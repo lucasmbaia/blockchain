@@ -1,9 +1,8 @@
-package main
+package blockchain
 
 import (
 	"bytes"
 	"crypto/sha256"
-	"fmt"
 	"strconv"
 	"time"
 )
