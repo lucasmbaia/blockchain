@@ -2,6 +2,7 @@ package blockchain
 
 import (
 	"encoding/hex"
+	"fmt"
 	"github.com/lucasmbaia/blockchain/utils"
 	"testing"
 	"time"
@@ -47,5 +48,7 @@ func Test_Block_Hash(t *testing.T) {
 		Nonce:      uint32(NONCE_BLOCK_125552),
 	}
 
-	bh.BlockHash()
+	hash := bh.BlockHash()
+
+	fmt.Println(HashToBig(&hash).Cmp(CalcDifficult(440711666)))
 }

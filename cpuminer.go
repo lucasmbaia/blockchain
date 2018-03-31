@@ -15,7 +15,8 @@ func CpuMiner(bh *BlockHeader) bool {
 		difficult *big.Int
 	)
 
-	difficult = CalcDifficult(bh.Bits)
+	//difficult = CalcDifficult(bh.Bits)
+	difficult = CalcDifficultEasy(int(bh.Bits))
 
 	for i := uint32(0); i < MAX_NONCE; i++ {
 		bh.Nonce = i
@@ -37,6 +38,13 @@ func HashToBig(hash *utils.Hash) *big.Int {
 	}
 
 	return new(big.Int).SetBytes(buf[:])
+}
+
+func CalcDifficultEasy(bits int) *big.Int {
+	dif := big.NewInt(1)
+	dif.Lsh(dif, uint(256-bits))
+
+	return dif
 }
 
 func CalcDifficult(n uint32) *big.Int {

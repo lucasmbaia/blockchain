@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	BITS_TEST_MINIG = 486604799
+	BITS_TEST_MINIG = 24
 )
 
 func Test_Cpu_Miner(t *testing.T) {
