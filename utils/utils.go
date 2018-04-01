@@ -4,7 +4,11 @@ import (
 	"crypto/sha256"
 )
 
-type Hash [32]byte
+const (
+	HASH_SIZE = 32
+)
+
+type Hash [HASH_SIZE]byte
 
 func CalcHash(b []byte) Hash {
 	return Hash(sha256.Sum256(b))

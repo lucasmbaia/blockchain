@@ -27,6 +27,7 @@ func Test_Block_Hash(t *testing.T) {
 		err     error
 	)
 
+	//td = time.Unix(time.Now().Unix(), 0)
 	td = time.Date(2011, time.May, 21, 17, 26, 31, 0, time.UTC)
 	if prev, err = hex.DecodeString(PREV_HASH_LT_BLOCK_125552); err != nil {
 		t.Fatal(err)

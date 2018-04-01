@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"github.com/lucasmbaia/blockchain/utils"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -22,6 +23,8 @@ func Test_Cpu_Miner(t *testing.T) {
 		merkle  []byte
 		err     error
 	)
+
+	runtime.GOMAXPROCS(runtime.NumCPU())
 
 	td = time.Date(2018, time.March, 31, 16, 37, 31, 0, time.UTC)
 	if prev, err = hex.DecodeString(PREV_HASH_LT_BLOCK_125552); err != nil {
