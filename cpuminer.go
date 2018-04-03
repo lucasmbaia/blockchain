@@ -2,6 +2,7 @@ package blockchain
 
 import (
 	"github.com/lucasmbaia/blockchain/utils"
+	"log"
 	"math/big"
 )
 
@@ -10,9 +11,10 @@ const (
 	//MAX_NONCE = uint32(1)
 )
 
-func CpuMiner(bh *BlockHeader) bool {
+func CpuMiner(bh *BlockHeader) (bool, utils.Hash) {
 	var (
 		difficult *big.Int
+		hash      utils.Hash
 	)
 
 	//difficult = CalcDifficult(bh.Bits)
@@ -20,14 +22,15 @@ func CpuMiner(bh *BlockHeader) bool {
 
 	for i := uint32(0); i < MAX_NONCE; i++ {
 		bh.Nonce = i
-		hash := bh.BlockHash()
+		hash = bh.BlockHash()
 
 		if HashToBig(&hash).Cmp(difficult) <= 0 {
-			return true
+			log.Println("#################### Block Mined ####################")
+			return true, hash
 		}
 	}
 
-	return false
+	return false, hash
 }
 
 func HashToBig(hash *utils.Hash) *big.Int {
