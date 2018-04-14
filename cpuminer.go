@@ -8,7 +8,6 @@ import (
 
 const (
 	MAX_NONCE = ^uint32(0)
-	//MAX_NONCE = uint32(1)
 )
 
 func CpuMiner(bh *BlockHeader) (bool, utils.Hash) {
