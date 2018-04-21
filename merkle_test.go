@@ -5,7 +5,9 @@ import (
 )
 
 func Test_NewMerkleTree(t *testing.T) {
-	transactions := [][]byte{{'A'}, {'B'}, {'C'}}
+	var ctbx = NewCoinbase("", "coinbase transaction")
+	var transactions []*Transaction
+	transactions = append(transactions, ctbx)
 
 	NewMerkleTree(transactions)
 }

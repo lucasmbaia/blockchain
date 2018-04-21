@@ -23,6 +23,7 @@ func (bc *Blockchain) AddBlock(data []byte) {
 		hash  utils.Hash
 		index int64
 		err   error
+		ctbx  *Transaction
 	)
 
 	if err = bc.db.View(func(tx *bolt.Tx) error {
@@ -41,8 +42,10 @@ func (bc *Blockchain) AddBlock(data []byte) {
 		log.Fatalf("Error to add new block: %s\n", err)
 	}
 
+	ctbx = NewCoinbase("", "Coinbase Transaction")
+
 	index++
-	var newBlock = NewBlock(int32(index), data, hash)
+	var newBlock = NewBlock(int32(index), []*Transaction{ctbx}, data, hash)
 
 	if err = bc.db.Update(func(tx *bolt.Tx) error {
 		var bucket *bolt.Bucket = tx.Bucket([]byte(BLOCKS_BOCKET))
@@ -112,7 +115,8 @@ func NewBlockchain() *Blockchain {
 		var bucket *bolt.Bucket = tx.Bucket([]byte(BLOCKS_BOCKET))
 
 		if bucket == nil {
-			var genesis = NewGenesisBlock()
+			var ctbx = NewCoinbase("", "Coinbase Transaction")
+			var genesis = NewGenesisBlock(ctbx)
 
 			if bucket, err = tx.CreateBucket([]byte(BLOCKS_BOCKET)); err != nil {
 				return err

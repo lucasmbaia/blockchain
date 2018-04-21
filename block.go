@@ -13,10 +13,11 @@ const (
 )
 
 type Block struct {
-	Index  int32
-	Header BlockHeader
-	Hash   utils.Hash
-	Data   []byte
+	Index        int32
+	Transactions []*Transaction
+	Header       BlockHeader
+	Hash         utils.Hash
+	Data         []byte
 }
 
 func (b *Block) Serialize() []byte {
@@ -41,7 +42,7 @@ func Deserialize(b []byte) *Block {
 	return &block
 }
 
-func NewBlock(index int32, data []byte, prevBlockHash utils.Hash) *Block {
+func NewBlock(index int32, transactions []*Transaction, data []byte, prevBlockHash utils.Hash) *Block {
 	bh := BlockHeader{
 		Version:   1,
 		PrevBlock: prevBlockHash,
@@ -50,6 +51,10 @@ func NewBlock(index int32, data []byte, prevBlockHash utils.Hash) *Block {
 	}
 
 	var hash utils.Hash
+	var merkle *MerkleRoot
+
+	merkle = NewMerkleTree(transactions)
+	bh.MerkleRoot = merkle.MerkleNode.Hash
 
 	_, hash = CpuMiner(&bh)
 
@@ -61,7 +66,7 @@ func NewBlock(index int32, data []byte, prevBlockHash utils.Hash) *Block {
 	}
 }
 
-func NewGenesisBlock() *Block {
+func NewGenesisBlock(coinbase *Transaction) *Block {
 	var prevBlockHash utils.Hash
-	return NewBlock(0, []byte("Genesis Block"), prevBlockHash)
+	return NewBlock(0, []*Transaction{coinbase}, []byte("Genesis Block"), prevBlockHash)
 }

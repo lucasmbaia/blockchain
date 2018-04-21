@@ -14,16 +14,16 @@ type MerkleNode struct {
 	Hash  utils.Hash
 }
 
-func NewMerkleTree(transactions [][]byte) *MerkleRoot {
+func NewMerkleTree(transactions []*Transaction) *MerkleRoot {
 	var (
 		nodes []MerkleNode
 	)
 
 	if len(transactions) == 1 {
-		var hash utils.Hash
-		copy(hash[:], transactions[0])
+		//var hash utils.Hash
+		//copy(hash[:], transactions[0])
 
-		nodes = append(nodes, MerkleNode{Hash: hash})
+		nodes = append(nodes, MerkleNode{Hash: transactions[0].ID})
 		return &MerkleRoot{&nodes[0]}
 	}
 
@@ -32,7 +32,7 @@ func NewMerkleTree(transactions [][]byte) *MerkleRoot {
 	}
 
 	for _, transaction := range transactions {
-		nodes = append(nodes, MerkleNode{Hash: utils.CalcDoubleHash(transaction)})
+		nodes = append(nodes, MerkleNode{Hash: utils.CalcDoubleHash(transaction.ID[:])})
 	}
 
 	for i := 0; i < len(transactions)/2; i++ {
