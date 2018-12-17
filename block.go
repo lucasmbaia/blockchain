@@ -31,6 +31,18 @@ func (b *Block) Serialize() []byte {
 	return result.Bytes()
 }
 
+func HashTransactions(transactions []*Transaction) utils.Hash {
+  var (
+    txHash  [][]byte
+  )
+
+  for _, tx := range transactions {
+    txHash = append(txHash, tx.ID[:])
+  }
+
+  return utils.CalcHash(bytes.Join(txHash, []byte{}))
+}
+
 func Deserialize(b []byte) *Block {
 	var block Block
 	var decoder *gob.Decoder = gob.NewDecoder(bytes.NewReader(b))
@@ -55,14 +67,16 @@ func NewBlock(index int32, transactions []*Transaction, data []byte, prevBlockHa
 
 	merkle = NewMerkleTree(transactions)
 	bh.MerkleRoot = merkle.MerkleNode.Hash
+	bh.HashTransactions = HashTransactions(transactions)
 
 	_, hash = CpuMiner(&bh)
 
 	return &Block{
-		Index:  index,
-		Header: bh,
-		Hash:   hash,
-		Data:   data,
+		Index:	      index,
+		Transactions: transactions,
+		Header:	      bh,
+		Hash:	      hash,
+		Data:	      data,
 	}
 }
 

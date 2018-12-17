@@ -8,12 +8,13 @@ import (
 )
 
 type BlockHeader struct {
-	Version    int32
-	PrevBlock  utils.Hash
-	MerkleRoot utils.Hash
-	Bits       uint32
-	Timestamp  time.Time
-	Nonce      uint32
+	Version		  int32
+	PrevBlock	  utils.Hash
+	MerkleRoot	  utils.Hash
+	HashTransactions  utils.Hash
+	Bits		  uint32
+	Timestamp	  time.Time
+	Nonce		  uint32
 }
 
 func (b *BlockHeader) BlockHash() utils.Hash {
@@ -22,7 +23,7 @@ func (b *BlockHeader) BlockHash() utils.Hash {
 		elements []interface{}
 	)
 
-	elements = []interface{}{b.Version, b.PrevBlock, b.MerkleRoot, b.Timestamp, b.Bits, b.Nonce}
+	elements = []interface{}{b.Version, b.PrevBlock, b.MerkleRoot, b.HashTransactions, b.Timestamp, b.Bits, b.Nonce}
 	buf = bytes.NewBuffer(make([]byte, 0, 80))
 
 	for _, value := range elements {
