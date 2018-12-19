@@ -3,6 +3,7 @@ package utils
 import (
   "math/big"
   "bytes"
+  "crypto/sha256"
 )
 
 var (
@@ -52,4 +53,27 @@ func Base58Decode(input []byte) []byte {
   decoded = append(bytes.Repeat([]byte{byte(0x00)}, count), decoded...)
 
   return decoded
+}
+
+func CheckDecode(input string) (result []byte, version byte, err error) {
+    decoded := Base58Decode([]byte(input))
+    if len(decoded) < 5 {
+	return nil, 0, nil
+    }
+    version = decoded[0]
+    var cksum [4]byte
+    copy(cksum[:], decoded[len(decoded)-4:])
+    if checksum(decoded[:len(decoded)-4]) != cksum {
+	return nil, 0, nil
+    }
+    payload := decoded[1 : len(decoded)-4]
+    result = append(result, payload...)
+    return
+}
+
+func checksum(input []byte) (cksum [4]byte) {
+    h := sha256.Sum256(input)
+    h2 := sha256.Sum256(h[:])
+    copy(cksum[:], h2[:4])
+    return
 }

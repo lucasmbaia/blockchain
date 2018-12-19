@@ -14,7 +14,7 @@ func Test_NewBlockchain_Add_Block(t *testing.T) {
 }
 
 func Test_Iterator_PrintBlochckain(t *testing.T) {
-	var bc = NewBlockchain([]byte("18xB6w3WrNDriHruodzxsRFsiqYx6VufYY"))
+	var bc = NewBlockchain([]byte("1CyssrDhEvZv2jXci6F5oueZwMXszm6kLs"))
 	var bci = bc.Iterator()
 	var stop = big.NewInt(0)
 
@@ -36,5 +36,15 @@ func Test_UnspentTransaction(t *testing.T) {
     t.Fatal(err)
   } else {
     fmt.Println(tx)
+  }
+}
+
+func Test_NewTransaction(t *testing.T) {
+    bc := NewBlockchain([]byte("1CyssrDhEvZv2jXci6F5oueZwMXszm6kLs"))
+
+    if transaction, err := bc.NewTransaction("1CyssrDhEvZv2jXci6F5oueZwMXszm6kLs", "18xB6w3WrNDriHruodzxsRFsiqYx6VufYY", 10.0); err != nil {
+      t.Fatal(err)
+  } else {
+      fmt.Println(transaction)
   }
 }

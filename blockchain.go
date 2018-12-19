@@ -8,12 +8,14 @@ import (
 	"strconv"
 	"encoding/hex"
 	"math/big"
+	"errors"
 	//"bytes"
 )
 
 const (
 	DBFILE        = "/root/workspace/go/src/github.com/lucasmbaia/blockchain/blockchain.db"
 	BLOCKS_BOCKET = "blocks"
+	MINING_RATE   = 10000
 )
 
 type Blockchain struct {
@@ -150,6 +152,84 @@ func (bc *Blockchain) FindUTXO(address []byte) ([]TXOutput, error) {
   }
 
   return txOUT, nil
+}
+
+func (bc *Blockchain) NewTransaction(from, to string, amount uint64) (*Transaction, error) {
+    var (
+	transaction *Transaction
+	unspentOut  = make(map[utils.Hash][]int)
+	err	    error
+	//change	    = make(map[utils.Hash]int)
+	decoded	    []byte
+	pubHash	    []byte
+	total	    uint64
+	inputs	    []TXInput
+	outputs	    []TXOutput
+	output	    TXOutput
+	hash	    utils.Hash
+    )
+
+    decoded = utils.Base58Decode([]byte(from))
+    pubHash = decoded[1:len(decoded)-4]
+
+    if unspentOut, _, total, err = bc.FindSpendable(pubHash, amount); err != nil {
+	return transaction, err
+    }
+
+    if total < amount {
+	return transaction, errors.New("Not enough funds")
+    }
+
+    for hash, txOut := range unspentOut {
+	for _, out := range txOut {
+	    inputs = append(inputs, TXInput{TXid: hash[:], Vout: out, ScriptSig: from})
+	}
+    }
+
+    output = TXOutput{Value: amount}
+    output.Lock([]byte(to))
+    outputs = append(outputs, output)
+
+    if total > amount {
+      output = TXOutput{Value: total - (amount + MINING_RATE)}
+      output.Lock([]byte(from))
+      outputs = append(outputs, output)
+    }
+
+    transaction = &Transaction{1, hash, int32(len(inputs)), inputs, int32(len(outputs)), outputs}
+    transaction.SetID()
+
+    return transaction, nil
+}
+
+func (bc *Blockchain) FindSpendable(pubHash []byte, amount uint64) (map[utils.Hash][]int, map[utils.Hash]int, uint64, error) {
+    var (
+      unspentTX	  []Transaction
+      acumulated  uint64 = 0
+      err	  error
+      unspentOut  = make(map[utils.Hash][]int)
+      change	  = make(map[utils.Hash]int)
+    )
+
+    amount += MINING_RATE
+    if unspentTX, err = bc.UnspentTransaction(pubHash); err != nil {
+	return nil, nil, 0, err
+    }
+
+    Unspent:
+    for _, tx := range unspentTX {
+	for idxOut, out := range tx.TXOutput {
+	    acumulated += out.Value
+	    unspentOut[tx.ID] = append(unspentOut[tx.ID], idxOut)
+
+	    if acumulated > amount {
+		change[tx.ID] = idxOut
+		break Unspent
+	    }
+	}
+    }
+
+    return unspentOut, change, acumulated, nil
 }
 
 type BlockchainIterator struct {

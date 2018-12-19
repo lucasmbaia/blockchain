@@ -3,6 +3,7 @@ package blockchain
 import (
   "testing"
   "fmt"
+  "encoding/hex"
 )
 
 func Test_NewWallet(t *testing.T) {
@@ -10,6 +11,7 @@ func Test_NewWallet(t *testing.T) {
     t.Fatal(err)
   } else {
     fmt.Println(w.PrivateToHex())
+    fmt.Println(hex.EncodeToString(w.PublicKey))
     fmt.Println(string(w.Address))
   }
 }
@@ -28,5 +30,5 @@ func Test_UnlockWallet(t *testing.T) {
 }
 
 func Test_AddressToPubHash(t *testing.T) {
-  AddressToPubHash([]byte("17v71YtfJoUCtKAfyYg8A4ppTQryqGDsNz"))
+  fmt.Println(AddressToPubHash([]byte("1MqBa28JuNheJCUffusossLXTcFGBqqZ9A")))
 }
