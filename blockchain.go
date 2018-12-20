@@ -112,12 +112,12 @@ func (bc *Blockchain) UnspentTransaction(pubHash []byte) ([]Transaction, error) 
 
       if !tx.IsCoinbase() {
 	  fmt.Println("NAO ERA PRA ENTRAR AQUI")
-	for _, in := range tx.TXInput {
-	  if in.ScriptSig == string(pubHash) {
-	    var inTxID = hex.EncodeToString(in.TXid)
-	    spentTX[inTxID] = append(spentTX[inTxID], in.Vout)
-	  }
-	}
+	//for _, in := range tx.TXInput {
+	  //if in.ScriptSig == string(pubHash) {
+	    //var inTxID = hex.EncodeToString(in.TXid)
+	    //spentTX[inTxID] = append(spentTX[inTxID], in.Vout)
+	  //}
+	//}
       }
     }
 
@@ -176,15 +176,16 @@ func (bc *Blockchain) NewTransaction(from, to string, amount uint64) (*Transacti
 	return transaction, err
     }
 
+    fmt.Println(unspentOut)
     if total < amount {
 	return transaction, errors.New("Not enough funds")
     }
 
-    for hash, txOut := range unspentOut {
-	for _, out := range txOut {
-	    inputs = append(inputs, TXInput{TXid: hash[:], Vout: out, ScriptSig: from})
-	}
-    }
+    //for hash, txOut := range unspentOut {
+	//for _, out := range txOut {
+	    //inputs = append(inputs, TXInput{TXid: hash[:], Vout: out, ScriptSig: from})
+	//}
+    //}
 
     output = TXOutput{Value: amount}
     output.Lock([]byte(to))

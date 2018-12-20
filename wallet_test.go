@@ -32,3 +32,11 @@ func Test_UnlockWallet(t *testing.T) {
 func Test_AddressToPubHash(t *testing.T) {
   fmt.Println(AddressToPubHash([]byte("1MqBa28JuNheJCUffusossLXTcFGBqqZ9A")))
 }
+
+func Test_HashPubKey(t *testing.T) {
+  if hash, err := HashPubKey([]byte("18MBM8umeDF9DzEcgnCi7GkeqX2jyzUU8h")); err != nil {
+      t.Fatal(err)
+  } else {
+      fmt.Println(hex.EncodeToString(hash))
+  }
+}

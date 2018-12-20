@@ -19,3 +19,7 @@ func Test_AddressHashSPK(t *testing.T) {
     address := "1JKbpvHpTzs854ztJfJv2XVyV2tQ5LZdjV"
     fmt.Println(AddressHashSPK([]byte(address)))
 }
+
+func Test_ConvertUnsigned8Bytes(t *testing.T) {
+    fmt.Println(ConvertUnsigned8Bytes(uint64(16932484)))
+}
