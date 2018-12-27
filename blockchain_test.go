@@ -2,6 +2,7 @@ package blockchain
 
 import (
 	"fmt"
+	"github.com/lucasmbaia/blockchain/utils"
 	"math/big"
 	"testing"
 )
@@ -24,7 +25,7 @@ func Test_Iterator_PrintBlochckain(t *testing.T) {
 		fmt.Printf("Block Index: %d, Block Hash: %x, Block Data: %s, Block Prev. Hash: %x, Block Bits: %d, Block Create: %s, Block Nonce: %d\n", block.Index, block.Hash, block.Data, block.Header.PrevBlock[:], block.Header.Bits, block.Header.Timestamp, block.Header.Nonce)
 
 		for _, transactions := range block.Transactions {
-		    fmt.Printf("Transaction ID: %x\n", transactions.ID)
+			fmt.Printf("Transaction ID: %x\n", transactions.ID)
 		}
 
 		if HashToBig(&block.Header.PrevBlock).Cmp(stop) == 0 {
@@ -34,21 +35,33 @@ func Test_Iterator_PrintBlochckain(t *testing.T) {
 }
 
 func Test_UnspentTransaction(t *testing.T) {
-  bc := NewBlockchain([]byte("18xB6w3WrNDriHruodzxsRFsiqYx6VufYY"))
+	bc := NewBlockchain([]byte("1CyssrDhEvZv2jXci6F5oueZwMXszm6kLs"))
+	pubHash := utils.AddressHashSPK([]byte("1CyssrDhEvZv2jXci6F5oueZwMXszm6kLs"))
 
-  if tx, err := bc.UnspentTransaction([]byte("18xB6w3WrNDriHruodzxsRFsiqYx6VufYY")); err != nil {
-    t.Fatal(err)
-  } else {
-    fmt.Println(tx)
-  }
+	if tx, err := bc.UnspentTransaction(pubHash); err != nil {
+		t.Fatal(err)
+	} else {
+		fmt.Println(tx)
+	}
 }
 
 func Test_NewTransaction(t *testing.T) {
-    bc := NewBlockchain([]byte("1CyssrDhEvZv2jXci6F5oueZwMXszm6kLs"))
+	bc := NewBlockchain([]byte("1CyssrDhEvZv2jXci6F5oueZwMXszm6kLs"))
 
-    if transaction, err := bc.NewTransaction("1CyssrDhEvZv2jXci6F5oueZwMXszm6kLs", "18xB6w3WrNDriHruodzxsRFsiqYx6VufYY", 10.0); err != nil {
-      t.Fatal(err)
-  } else {
-      fmt.Println(transaction)
-  }
+	if transaction, err := bc.NewTransaction([]byte("1CyssrDhEvZv2jXci6F5oueZwMXszm6kLs"), []byte("18xB6w3WrNDriHruodzxsRFsiqYx6VufYY"), 100000); err != nil {
+		t.Fatal(err)
+	} else {
+		fmt.Println(transaction)
+	}
+}
+
+func Test_FindSpendable(t *testing.T) {
+	bc := NewBlockchain([]byte("1CyssrDhEvZv2jXci6F5oueZwMXszm6kLs"))
+	pubHash := utils.AddressHashSPK([]byte("1CyssrDhEvZv2jXci6F5oueZwMXszm6kLs"))
+
+	if unspentOut, _, total, err := bc.FindSpendable(pubHash, 100000); err != nil {
+		t.Fatal(err)
+	} else {
+		fmt.Println(unspentOut, total)
+	}
 }

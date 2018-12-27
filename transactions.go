@@ -1,374 +1,441 @@
 package blockchain
 
 import (
-    "bytes"
-    "encoding/gob"
-    "fmt"
-    "github.com/lucasmbaia/blockchain/utils"
-    "github.com/btcsuite/btcd/btcec"
-    "log"
-    "strconv"
-    "strings"
-    "encoding/hex"
-    "reflect"
-    //"crypto/ecdsa"
-    //"crypto/rand"
-    //"math/big"
-    //"time"
+	"bytes"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"encoding/gob"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	//"github.com/btcsuite/btcd/btcec"
+	"github.com/lucasmbaia/blockchain/utils"
+	"log"
+	"math/big"
+	"reflect"
+	"strconv"
+	"strings"
+	"time"
 )
 
 type SigHashType uint32
+
 const (
-    REWARD	uint64 = 2500000000
-    SigHashAll	SigHashType = 0x1
+	REWARD     uint64      = 2500000000
+	SigHashAll SigHashType = 0x1
 )
 
 type Transaction struct {
-    Version       int32
-    ID            utils.Hash
-    TXInputCount  int32
-    TXInput       []TXInput
-    TXOutputCount int32
-    TXOutput      []TXOutput
-    //LockTime      time.Time
+	Version       int32
+	ID            utils.Hash
+	Created       time.Time
+	TXInputCount  int32
+	TXInput       []TXInput
+	TXOutputCount int32
+	TXOutput      []TXOutput
+	//LockTime      time.Time
 }
 
 type TXInput struct {
-    TXid      utils.Hash  //identificador da transacao
-    Vout      int	  //identifica uma saida especifica a ser gasta
-    ScriptSig ScriptSig	  //fornece parametros de dados que satisfazem as condicoes do script pubkey
+	TXid      utils.Hash //identificador da transacao
+	Vout      int        //identifica uma saida especifica a ser gasta
+	ScriptSig ScriptSig  //fornece parametros de dados que satisfazem as condicoes do script pubkey
 }
 
 type ScriptSig struct {
-    Asm	string
-    Hex	string
+	Asm string
+	Hex string
 }
 
 type TXOutput struct {
-    Index	  int
-    Value	  uint64
-    ScriptPubKey  ScriptPubKey
-    Address	  []byte
+	Index        int
+	Value        uint64
+	ScriptPubKey ScriptPubKey
+	Address      []byte
 }
 
 type ScriptPubKey struct {
-    Asm	string
-    Hex	string
+	Asm string
+	Hex string
 }
 
 func (tx *Transaction) Serialize() []byte {
-    var result bytes.Buffer
-    var encoder *gob.Encoder = gob.NewEncoder(&result)
+	var result bytes.Buffer
+	var encoder *gob.Encoder = gob.NewEncoder(&result)
 
-    if err := encoder.Encode(tx); err != nil {
-	log.Printf("Error to serialize transaction: %s\n", err)
-    }
+	if err := encoder.Encode(tx); err != nil {
+		log.Printf("Error to serialize transaction: %s\n", err)
+	}
 
-    return result.Bytes()
+	return result.Bytes()
 }
 
 func DeserializeTransaction(t []byte) *Transaction {
-    var transaction Transaction
-    var decoder *gob.Decoder = gob.NewDecoder(bytes.NewReader(t))
+	var transaction Transaction
+	var decoder *gob.Decoder = gob.NewDecoder(bytes.NewReader(t))
 
-    if err := decoder.Decode(&transaction); err != nil {
-	log.Printf("Error to deserialize: %s\n", err)
-    }
+	if err := decoder.Decode(&transaction); err != nil {
+		log.Printf("Error to deserialize: %s\n", err)
+	}
 
-    return &transaction
+	return &transaction
 }
 
 func (tx *Transaction) IsCoinbase() bool {
-    return len(tx.TXInput) == 1 && len(tx.TXInput[0].TXid) == 0 && tx.TXInput[0].Vout == -1
+	return len(tx.TXInput) == 0
+	//return len(tx.TXInput) == 1 && len(tx.TXInput[0].TXid) == 0 && tx.TXInput[0].Vout == -1
 }
 
 func (txOut *TXOutput) Lock(address []byte) {
-    //txOut.ScriptPubKey = utils.AddressHashSPK(address)
-    //txOut.Address = address
+	hashPubKey := AddressToPubHash(address)
+
+	txOut.ScriptPubKey = ScriptPubKey{
+		Asm: fmt.Sprintf("OP_DUP OP_HASH160 %s OP_EQUALVERIFY OP_CHECKSIG", hex.EncodeToString(hashPubKey)),
+		Hex: utils.AddressHashSPK(address),
+	}
 }
 
-func (txOut *TXOutput) Unlock(pubHash []byte) bool {
-    return true
-    //return bytes.Compare(txOut.ScriptPubKey, pubHash) == 0
+func (txOut *TXOutput) Unlock(pubHash string) bool {
+	return strings.Compare(txOut.ScriptPubKey.Hex, pubHash) == 0
 }
 
 func (tx *Transaction) SetID() {
-    var (
-	encoded bytes.Buffer
-	err     error
-    )
-
-    var encoder = gob.NewEncoder(&encoded)
-    if err = encoder.Encode(tx); err != nil {
-	log.Fatalf("Error to SetID: %s\n", err)
-    }
-
-    tx.ID = utils.CalcDoubleHash(encoded.Bytes())
+	var hash = utils.CalcDoubleHash(tx.Serialize())
+	tx.ID = hash
 }
 
 func (tx *Transaction) RawTransaction() string {
-    var (
-	raw		[]string
-	inputs		string
-	outputs		string
-    )
+	var (
+		raw     []string
+		inputs  string
+		outputs string
+	)
 
-    inputs = strconv.FormatInt(int64(tx.TXInputCount), 16)
-    if len(inputs) == 1 {
-	inputs = fmt.Sprintf("0%s", inputs)
-    }
-
-    outputs = strconv.FormatInt(int64(tx.TXOutputCount), 16)
-    if len(outputs) == 1 {
-	outputs = fmt.Sprintf("0%s", outputs)
-    }
-
-    /*raw = append(raw, utils.ConvertUnsigned4Bytes(uint32(tx.Version)))  //four-byte version
-    raw = append(raw, inputs) //total inputs of transaction
-    raw = append(raw, utils.ReverseHash(tx.ID[:])) //reverse transaction the redeem an output
-    raw = append(raw, utils.ConvertUnsigned4Bytes(uint32(tx.TXOutputCount) - 1)) //four-byte of number transaction outputs
-    raw = append(raw, "19") // lenght of scriptSig
-    raw = append(raw, utils.AddressHashSPK(tx.TXOutput[0].Address)) //address hash of scriptPubKey
-    raw = append(raw, "ffffffff") //four-byte field denoting the sequence
-    raw = append(raw, outputs) //one-byte number of outputs
-    raw = append(raw, utils.ConvertUnsigned8Bytes(amount)) //eigth-byte of amount transfer
-    raw = append(raw, "19")
-    raw = append(raw, utils.AddressHashSPK(tx.TXOutput[1].Address))
-    raw = append(raw, "00000000") //lock-time field
-    raw = append(raw, "01000000") //four-byte hash code type*/
-
-    /*raw = append(raw, utils.ConvertUnsigned4Bytes(uint32(tx.Version)))  //four-byte version
-    raw = append(raw, inputs) //total inputs of transaction
-
-    //fazer a magica nova aqui porra a partir dos inputs
-    raw = append(raw, utils.ReverseHash(tx.ID[:])) //reverse transaction the redeem an output
-    raw = append(raw, utils.ConvertUnsigned4Bytes(uint32(tx.TXOutputCount) - 1)) //four-byte of number transaction outputs "trocar essa parada aqui, tem que referenciar o numero do output"
-    raw = append(raw, "ffffffff") //four-byte field denoting the sequence
-    raw = append(raw, outputs) //one-byte number of outputs
-
-    for _, out := range tx.TXOutput {
-	raw = append(raw, utils.ConvertUnsigned8Bytes(out.Value)) //eigth-byte of amount transfer
-	raw = append(raw, "19") //lenght of scriptSig
-	raw = append(raw, out.ScriptPubKey) //address hash of scriptPubKey
-    }
-
-    raw = append(raw, "00000000") //lock-time field*/
-
-    raw = append(raw, utils.ConvertUnsigned4Bytes(uint32(tx.Version)))  //four-byte version
-    raw = append(raw, inputs) //total inputs of transaction
-
-    for _, input := range tx.TXInput {
-	raw = append(raw, utils.ReverseHash(input.TXid[:]))
-	raw = append(raw, utils.ConvertUnsigned4Bytes(uint32(input.Vout)))
-
-	if (ScriptSig{}) != input.ScriptSig {
-	    if input.ScriptSig.Hex != "" {
-		raw = append(raw, input.ScriptSig.Hex)
-	    }
+	inputs = strconv.FormatInt(int64(tx.TXInputCount), 16)
+	if len(inputs) == 1 {
+		inputs = fmt.Sprintf("0%s", inputs)
 	}
 
+	outputs = strconv.FormatInt(int64(tx.TXOutputCount), 16)
+	if len(outputs) == 1 {
+		outputs = fmt.Sprintf("0%s", outputs)
+	}
+
+	/*raw = append(raw, utils.ConvertUnsigned4Bytes(uint32(tx.Version)))  //four-byte version
+	raw = append(raw, inputs) //total inputs of transaction
+	raw = append(raw, utils.ReverseHash(tx.ID[:])) //reverse transaction the redeem an output
+	raw = append(raw, utils.ConvertUnsigned4Bytes(uint32(tx.TXOutputCount) - 1)) //four-byte of number transaction outputs
+	raw = append(raw, "19") // lenght of scriptSig
+	raw = append(raw, utils.AddressHashSPK(tx.TXOutput[0].Address)) //address hash of scriptPubKey
 	raw = append(raw, "ffffffff") //four-byte field denoting the sequence
-    }
+	raw = append(raw, outputs) //one-byte number of outputs
+	raw = append(raw, utils.ConvertUnsigned8Bytes(amount)) //eigth-byte of amount transfer
+	raw = append(raw, "19")
+	raw = append(raw, utils.AddressHashSPK(tx.TXOutput[1].Address))
+	raw = append(raw, "00000000") //lock-time field
+	raw = append(raw, "01000000") //four-byte hash code type*/
 
-    raw = append(raw, outputs) //one-byte number of outputs
+	/*raw = append(raw, utils.ConvertUnsigned4Bytes(uint32(tx.Version)))  //four-byte version
+	raw = append(raw, inputs) //total inputs of transaction
 
-    for _, output := range tx.TXOutput {
-	raw = append(raw, utils.ConvertUnsigned8Bytes(output.Value)) //eigth-byte of amount transfer
-	raw = append(raw, "19") //lenght of scriptSig
-	raw = append(raw,  utils.AddressHashSPK(output.Address)) //address hash of scriptPubKey
-    }
+	//fazer a magica nova aqui porra a partir dos inputs
+	raw = append(raw, utils.ReverseHash(tx.ID[:])) //reverse transaction the redeem an output
+	raw = append(raw, utils.ConvertUnsigned4Bytes(uint32(tx.TXOutputCount) - 1)) //four-byte of number transaction outputs "trocar essa parada aqui, tem que referenciar o numero do output"
+	raw = append(raw, "ffffffff") //four-byte field denoting the sequence
+	raw = append(raw, outputs) //one-byte number of outputs
 
-    raw = append(raw, "00000000") //lock-time field*/
+	for _, out := range tx.TXOutput {
+		raw = append(raw, utils.ConvertUnsigned8Bytes(out.Value)) //eigth-byte of amount transfer
+		raw = append(raw, "19") //lenght of scriptSig
+		raw = append(raw, out.ScriptPubKey) //address hash of scriptPubKey
+	}
 
-    return strings.Join(raw, "")
+	raw = append(raw, "00000000") //lock-time field*/
+
+	raw = append(raw, utils.ConvertUnsigned4Bytes(uint32(tx.Version))) //four-byte version
+	raw = append(raw, inputs)                                          //total inputs of transaction
+
+	for _, input := range tx.TXInput {
+		raw = append(raw, utils.ReverseHash(input.TXid[:]))
+		raw = append(raw, utils.ConvertUnsigned4Bytes(uint32(input.Vout)))
+
+		if (ScriptSig{}) != input.ScriptSig {
+			if input.ScriptSig.Hex != "" {
+				raw = append(raw, input.ScriptSig.Hex)
+			}
+		}
+
+		raw = append(raw, "ffffffff") //four-byte field denoting the sequence
+	}
+
+	raw = append(raw, outputs) //one-byte number of outputs
+
+	for _, output := range tx.TXOutput {
+		raw = append(raw, utils.ConvertUnsigned8Bytes(output.Value)) //eigth-byte of amount transfer
+		raw = append(raw, "19")                                      //lenght of scriptSig
+		raw = append(raw, utils.AddressHashSPK(output.Address))      //address hash of scriptPubKey
+	}
+
+	raw = append(raw, "00000000") //lock-time field*/
+
+	return strings.Join(raw, "")
+}
+
+func p2pkh(r *big.Int, s *big.Int) string {
+	var (
+		sString         string
+		rString         string
+		signature       []string
+		signatureLength int
+	)
+
+	rString = hex.EncodeToString(r.Bytes())
+	sString = hex.EncodeToString(s.Bytes())
+
+	signatureLength = ((len(rString) + len(sString)) / 2) + 4 // size of r, size of s and +4 bytes
+
+	signature = append(signature, "30")                                          //DER signature marker
+	signature = append(signature, strconv.FormatInt(int64(signatureLength), 16)) //declares signature lenght in bytes
+	signature = append(signature, "02")                                          //r value maker
+	signature = append(signature, strconv.FormatInt(int64(len(rString)/2), 16))  //r lenght in bytes
+	signature = append(signature, rString)                                       //r value
+	signature = append(signature, "02")                                          //s value maker
+	signature = append(signature, strconv.FormatInt(int64(len(sString)/2), 16))  //s lenght in bytes
+	signature = append(signature, sString)                                       //s value
+	signature = append(signature, "01")                                          //SIGHASH_ALL
+
+	return strings.Join(signature, "")
 }
 
 func (tx *Transaction) SignTransaction(w *Wallet, txs []Transaction) error {
-    var (
-	raw	    string
-	d2sha256    utils.Hash
-	data	    []byte
-	err	    error
-	signature   *btcec.Signature
-	//scriptSig   []byte
-	key	    = (*btcec.PrivateKey)(&w.PrivateKey)
-	//sign	    []string
-	//inputs	    string
-	//outputs	    string
-	//porra	    []string
-	hashPubKey	[]byte
-    )
+	var (
+		raw        string
+		d2sha256   utils.Hash
+		data       []byte
+		err        error
+		hashPubKey []byte
+		r          *big.Int
+		s          *big.Int
+	)
 
-    for idx, out := range tx.TXOutput {
-	if hashPubKey, err = HashPubKey(out.Address); err != nil {
-	    return err
+	for idx, out := range tx.TXOutput {
+		if reflect.DeepEqual(out, (TXOutput{})) {
+			if hashPubKey, err = HashPubKey(out.Address); err != nil {
+				return err
+			}
+
+			tx.TXOutput[idx].ScriptPubKey = ScriptPubKey{
+				Asm: fmt.Sprintf("OP_DUP OP_HASH160 %s OP_EQUALVERIFY OP_CHECKSIG", hex.EncodeToString(hashPubKey)),
+				Hex: utils.AddressHashSPK(out.Address),
+			}
+		}
 	}
 
-	tx.TXOutput[idx].ScriptPubKey = ScriptPubKey {
-	    Asm:  fmt.Sprintf("OP_DUP OP_HASH160 %s OP_EQUALVERIFY OP_CHECKSIG", hex.EncodeToString(hashPubKey)),
-	    Hex:  utils.AddressHashSPK(out.Address),
+	for idx, input := range tx.TXInput {
+		var transaction Transaction
+
+		for _, txin := range txs {
+			if bytes.Compare(input.TXid[:], txin.ID[:]) == 0 {
+				transaction = txin
+			}
+		}
+
+		if !reflect.DeepEqual(transaction, (Transaction{})) {
+			raw = transaction.RawTransaction()
+			if data, err = hex.DecodeString(raw); err != nil {
+				return err
+			}
+
+			d2sha256 = utils.CalcDoubleHash(data)
+
+			/****** NEW CODE ******/
+			if r, s, err = ecdsa.Sign(rand.Reader, &w.PrivateKey, d2sha256[:]); err != nil {
+				return err
+			}
+			/***** END NEW CODE ******/
+
+			/*if signature, err = key.Sign(d2sha256[:]); err != nil {
+				return err
+			}*/
+
+			var asmSignature []string
+			var hexSignature []string
+
+			//var sign = append(signature.Serialize(), byte(SigHashAll))
+			//asmSignature = append(asmSignature, hex.EncodeToString(sign))
+			asmSignature = append(asmSignature, p2pkh(r, s))
+
+			var bytesSignature = strconv.FormatInt(int64(len(asmSignature[0])/2), 16)
+			hexSignature = append(hexSignature, bytesSignature)
+			hexSignature = append(hexSignature, asmSignature...)
+			asmSignature = append(asmSignature, "[ALL] ")
+			asmSignature = append(asmSignature, hex.EncodeToString(w.PublicKey))
+			hexSignature = append(hexSignature, "01")
+
+			var bytesPubKey = strconv.FormatInt(int64(len(hex.EncodeToString(w.PublicKey))/2), 16)
+
+			hexSignature = append(hexSignature, bytesPubKey)
+			hexSignature = append(hexSignature, hex.EncodeToString(w.PublicKey))
+
+			tx.TXInput[idx].ScriptSig = ScriptSig{strings.Join(asmSignature, ""), strings.Join(hexSignature, "")}
+		}
 	}
-    }
 
-    for idx, input := range tx.TXInput {
-	var transaction Transaction
-
-	for _, txin := range txs {
-	    if bytes.Compare(input.TXid[:], txin.ID[:]) == 0 {
-		transaction = txin
-	    }
-	}
-
-	if !reflect.DeepEqual(transaction, (Transaction{})) {
-	    raw = transaction.RawTransaction()
-	    if data, err = hex.DecodeString(raw); err != nil {
-		return err
-	    }
-
-	    d2sha256 = utils.CalcDoubleHash(data)
-
-	    /*if r, s, err = ecdsa.Sign(rand.Reader, &w.PrivateKey, d2sha256[:]); err != nil {
-		return err
-	    }
-
-	    signature = btcec.Signature{R: r, S: s}
-	    sign = append(signature.Serialize(), byte(SigHashAll))
-	    sign = append(sign, w.PublicKey...)*/
-
-	    if signature, err = key.Sign(d2sha256[:]); err != nil {
-		return err
-	    }
-
-	    var asmSignature []string
-	    var hexSignature []string
-
-	    var sign = append(signature.Serialize(), byte(SigHashAll))
-	    asmSignature = append(asmSignature, hex.EncodeToString(sign))
-
-	    var bytesSignature = strconv.FormatInt(int64(len(asmSignature[0]) / 2), 16);
-	    hexSignature = append(hexSignature, bytesSignature)
-	    hexSignature = append(hexSignature, asmSignature...)
-	    asmSignature = append(asmSignature, "[ALL] ")
-	    asmSignature = append(asmSignature, hex.EncodeToString(w.PublicKey))
-	    hexSignature = append(hexSignature, "01")
-
-	    var bytesPubKey = strconv.FormatInt(int64(len(hex.EncodeToString(w.PublicKey)) / 2), 16)
-
-	    hexSignature = append(hexSignature, bytesPubKey)
-	    hexSignature = append(hexSignature, hex.EncodeToString(w.PublicKey))
-
-	    tx.TXInput[idx].ScriptSig = ScriptSig{strings.Join(asmSignature, ""), strings.Join(hexSignature, "")}
-	    /*scriptSig = append(scriptSig, byte(0x4))
-	    scriptSig = append(scriptSig, w.PublicKey...)
-
-	    porra = append(porra, "01")
-	    bytesHash := strconv.FormatInt(int64(len(hex.EncodeToString(w.PublicKey)) / 2), 16)
-	    porra = append(porra, bytesHash)
-	    porra = append(porra, hex.EncodeToString(w.PublicKey))*/
-	}
-    }
-
-    /*inputs = strconv.FormatInt(int64(tx.TXInputCount), 16)
-    if len(inputs) == 1 {
-	inputs = fmt.Sprintf("0%s", inputs)
-    }
-
-    outputs = strconv.FormatInt(int64(tx.TXOutputCount), 16)
-    if len(outputs) == 1 {
-	outputs = fmt.Sprintf("0%s", outputs)
-    }
-
-    sign = append(sign, utils.ConvertUnsigned4Bytes(uint32(tx.Version)))  //four-byte version
-    sign = append(sign, inputs) //total inputs of transaction
-    sign = append(sign, utils.ReverseHash(tx.ID[:])) //reverse transaction the redeem an output
-    sign = append(sign, utils.ConvertUnsigned4Bytes(uint32(tx.TXOutputCount) - 1)) //four-byte of number transaction outputs
-    sign = append(sign, strconv.FormatInt(int64(len(scriptSig)), 16))
-    sign = append(sign, hex.EncodeToString(scriptSig))
-    sign = append(sign, "ffffffff") //four-byte field denoting the sequence
-    sign = append(sign, outputs) //one-byte number of outputs
-
-    for _, out := range tx.TXOutput[1:] {
-	sign = append(sign, utils.ConvertUnsigned8Bytes(out.Value)) //eigth-byte of amount transfer
-	sign = append(sign, "19") //lenght of scriptSig
-	sign = append(sign, utils.AddressHashSPK(out.Address)) //address hash of scriptPubKey
-    }
-
-    sign = append(sign, "00000000") //lock-time field
-
-    fmt.Println("RAW: ", raw)
-    fmt.Println("Raw Hash: ", hex.EncodeToString(d2sha256[:]))
-    fmt.Println("Script SIG: ", hex.EncodeToString(scriptSig))
-    fmt.Println("ALL: ", string(strings.Join(sign, "")))*/
-    return nil
+	return nil
 }
 
 /*func (tx *Transaction) Unlock(w *Wallet, address []byte) bool {
-    var (
-	signature string
-	pubkey	  string
-    )
+	var (
+		signature string
+		pubkey	  string
+	)
 
-    for _, input := range tx.TXInput {
-	signature, pubkey = parseScriptSig(input.ScriptSig)
-    }
+	for _, input := range tx.TXInput {
+		signature, pubkey = parseScriptSig(input.ScriptSig)
+	}
 }*/
 
-func unlock(scriptSig string, w *Wallet) {
-    var (
-	signature string
-	pubkey	  string
-	stack	  []string
-    )
+func ValidTransaction(tx *Transaction, bc *Blockchain) error {
+	var (
+		err         error
+		signature   string
+		pubkey      string
+		transaction Transaction
+		exists      bool
+		decoded     []byte
+		hpk         []byte
+		hspk        string
+		curve       elliptic.Curve
+		pubKeyLen   int
+		raw         string
+		data        []byte
+		d2sha256    utils.Hash
+	)
 
-    signature, pubkey, _ = parseScriptSig(scriptSig)
+	curve = elliptic.P256()
 
-    decoded, _ := hex.DecodeString(pubkey)
-    h1, _ := HashPubKey(decoded)
-    h2, _ := HashPubKey(w.PublicKey)
+	for _, input := range tx.TXInput {
+		if signature, pubkey, err = parseScriptSig(input.ScriptSig.Hex); err != nil {
+			return err
+		}
 
-    stack = append(stack, signature) //sig stack
-    stack = append(stack, pubkey) //pubKey stack
-    //stack = append(stack, HashPubKey([]byte(pubKey)))
-    //stack = append(stack, HashPubKey(w.PublicKey))
+		if exists, transaction, err = bc.FindTransaction(input.TXid); err != nil {
+			return err
+		}
 
-    fmt.Println(stack)
-    fmt.Println(hex.EncodeToString(h1))
-    fmt.Println(hex.EncodeToString(h2))
+		if !exists {
+			return errors.New("Transaction not exists")
+		}
 
-    fmt.Println(hex.EncodeToString(w.PublicKey))
-    fmt.Println(pubkey)
-    fmt.Println(scriptSig)
+		hspk = strings.Replace(transaction.TXOutput[input.Vout].ScriptPubKey.Asm, "OP_DUP OP_HASH160 ", "", -1)
+		hspk = strings.Replace(hspk, " OP_EQUALVERIFY OP_CHECKSIG", "", -1)
+
+		if decoded, err = hex.DecodeString(pubkey); err != nil {
+			return err
+		}
+
+		if hpk, err = HashPubKey(decoded); err != nil {
+			return err
+		}
+
+		if strings.Compare(hex.EncodeToString(hpk), hspk) != 0 {
+			return errors.New("OP_EQUALVERIFY is invalid")
+		}
+
+		var decodePubKey []byte
+		if decodePubKey, err = hex.DecodeString(pubkey); err != nil {
+			return err
+		}
+
+		pubKeyLen = len(decodePubKey)
+
+		var r = &big.Int{}
+		var s = &big.Int{}
+
+		if r, s, err = parseP2pkh(signature); err != nil {
+			return err
+		}
+
+		var x = big.Int{}
+		var y = big.Int{}
+		x.SetBytes(decodePubKey[:(pubKeyLen / 2)])
+		y.SetBytes(decodePubKey[(pubKeyLen / 2):])
+
+		var rawPubKey = ecdsa.PublicKey{curve, &x, &y}
+
+		raw = transaction.RawTransaction()
+		if data, err = hex.DecodeString(raw); err != nil {
+			return err
+		}
+
+		d2sha256 = utils.CalcDoubleHash(data)
+
+		if !ecdsa.Verify(&rawPubKey, d2sha256[:], r, s) {
+			return errors.New("CHECKSIG is invalid")
+		}
+	}
+
+	return nil
 }
 
 func parseScriptSig(scriptSig string) (string, string, error) {
-    var (
-	signature     string
-	sizeSignature int64
-	err	      error
-	cutePublicKey string
-    )
+	var (
+		signature     string
+		sizeSignature int64
+		err           error
+		cutePublicKey string
+	)
 
-    if sizeSignature, err = strconv.ParseInt(fmt.Sprintf("0x%s", scriptSig[:2]), 0, 64); err != nil {
-	return signature, cutePublicKey, err
-    }
+	if sizeSignature, err = strconv.ParseInt(fmt.Sprintf("0x%s", scriptSig[:2]), 0, 64); err != nil {
+		return signature, cutePublicKey, err
+	}
 
-    signature = scriptSig[2:sizeSignature*2+2]
-    cutePublicKey = scriptSig[sizeSignature*2+2:]
-    return signature, cutePublicKey[4:], nil
+	signature = scriptSig[2 : sizeSignature*2+2]
+	cutePublicKey = scriptSig[sizeSignature*2+2:]
+	return signature, cutePublicKey[4:], nil
+}
+
+func parseP2pkh(signature string) (*big.Int, *big.Int, error) {
+	var (
+		r       = &big.Int{}
+		s       = &big.Int{}
+		err     error
+		rSize   int64
+		decoder []byte
+		decodes []byte
+	)
+
+	if rSize, err = strconv.ParseInt(fmt.Sprintf("0x%s", signature[6:8]), 0, 64); err != nil {
+		return r, s, err
+	}
+
+	if decoder, err = hex.DecodeString(signature[8 : rSize*2+8]); err != nil {
+		return r, s, err
+	}
+
+	if decodes, err = hex.DecodeString(signature[rSize*2+8+4 : len(signature)-2]); err != nil {
+		return r, s, err
+	}
+
+	r.SetBytes(decoder)
+	s.SetBytes(decodes)
+
+	return r, s, nil
 }
 
 func NewCoinbase(to []byte, data string) *Transaction {
-    var hash utils.Hash
+	var hash utils.Hash
 
-    if data == "" {
-	data = fmt.Sprintf("Reward to '%s'", to)
-    }
+	if data == "" {
+		data = fmt.Sprintf("Reward to '%s'", to)
+	}
 
-    var txout = TXOutput{Value: REWARD}
-    txout.Lock(to)
+	var txout = TXOutput{Index: 0, Value: REWARD, Address: to}
+	txout.Lock(to)
 
-    var tx = Transaction{1, hash, 0, []TXInput{}, 1, []TXOutput{txout}}
-    tx.SetID()
+	var tx = Transaction{1, hash, time.Now(), 0, []TXInput{}, 1, []TXOutput{txout}}
+	tx.SetID()
 
-    return &tx
+	return &tx
 }

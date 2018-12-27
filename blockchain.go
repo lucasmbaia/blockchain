@@ -1,19 +1,20 @@
 package blockchain
 
 import (
+	"bytes"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"github.com/boltdb/bolt"
 	"github.com/lucasmbaia/blockchain/utils"
 	"log"
-	"strconv"
-	"encoding/hex"
 	"math/big"
-	"errors"
-	//"bytes"
+	"strconv"
+	"time"
 )
 
 const (
-	DBFILE        = "/root/workspace/go/src/github.com/lucasmbaia/blockchain/blockchain.db"
+	DBFILE        = "/root/go/src/github.com/lucasmbaia/blockchain/blockchain.db"
 	BLOCKS_BOCKET = "blocks"
 	MINING_RATE   = 10000
 )
@@ -76,161 +77,181 @@ func (bc *Blockchain) AddBlock(data []byte) {
 	}
 }
 
-func (bc *Blockchain) UnspentTransaction(pubHash []byte) ([]Transaction, error) {
-  var (
-    unspentTX []Transaction
-    spentTX   = make(map[string][]int)
-    bci	      = bc.Iterator()
-    txID      string
-    block     *Block
-    err	      error
-    stop      = big.NewInt(0)
-  )
+func (bc *Blockchain) UnspentTransaction(pubHash string) ([]Transaction, error) {
+	var (
+		unspentTX []Transaction
+		spentTX   = make(map[string][]int)
+		bci       = bc.Iterator()
+		txID      string
+		block     *Block
+		err       error
+		stop      = big.NewInt(0)
+	)
 
-  for {
-    if block, err = bci.Next(); err != nil {
-      return unspentTX, err
-    }
+	for {
+		if block, err = bci.Next(); err != nil {
+			return unspentTX, err
+		}
 
-    for _, tx := range block.Transactions {
-      txID = hex.EncodeToString(tx.ID[:])
-      Outputs:
-      for idx, out := range tx.TXOutput {
-	if spentTX[txID] != nil {
-	  for _, sout := range spentTX[txID] {
-	    if sout == idx {
-	      continue Outputs
-	    }
-	  }
+		for _, tx := range block.Transactions {
+			txID = hex.EncodeToString(tx.ID[:])
+		Outputs:
+			for idx, out := range tx.TXOutput {
+				if spentTX[txID] != nil {
+					for _, sout := range spentTX[txID] {
+						if sout == idx {
+							continue Outputs
+						}
+					}
+				}
+
+				if out.Unlock(pubHash) {
+					unspentTX = append(unspentTX, *tx)
+				}
+			}
+
+			/*if !tx.IsCoinbase() {
+				fmt.Println("NAO ERA PRA ENTRAR AQUI")
+				for _, in := range tx.TXInput {
+					if in.ScriptSig == string(pubHash) {
+						var inTxID = hex.EncodeToString(in.TXid)
+						spentTX[inTxID] = append(spentTX[inTxID], in.Vout)
+					}
+				}
+			}*/
+		}
+
+		if HashToBig(&block.Header.PrevBlock).Cmp(stop) == 0 {
+			break
+		}
 	}
 
-	if out.Unlock(pubHash) {
-	//if bytes.Equal(out.ScriptPubKey, address) {
-	  unspentTX = append(unspentTX, *tx)
+	return unspentTX, nil
+}
+
+func (bc *Blockchain) FindTransaction(id utils.Hash) (bool, Transaction, error) {
+	var (
+		bci   = bc.Iterator()
+		err   error
+		block *Block
+		stop  = big.NewInt(0)
+	)
+
+	for {
+		if block, err = bci.Next(); err != nil {
+			return false, Transaction{}, err
+		}
+
+		for _, transaction := range block.Transactions {
+			if bytes.Compare(transaction.ID[:], id[:]) == 0 {
+				return true, *transaction, nil
+			}
+		}
+
+		if HashToBig(&block.Header.PrevBlock).Cmp(stop) == 0 {
+			break
+		}
 	}
-      }
 
-      if !tx.IsCoinbase() {
-	  fmt.Println("NAO ERA PRA ENTRAR AQUI")
-	//for _, in := range tx.TXInput {
-	  //if in.ScriptSig == string(pubHash) {
-	    //var inTxID = hex.EncodeToString(in.TXid)
-	    //spentTX[inTxID] = append(spentTX[inTxID], in.Vout)
-	  //}
-	//}
-      }
-    }
-
-    if HashToBig(&block.Header.PrevBlock).Cmp(stop) == 0 {
-      break
-    }
-  }
-
-  return unspentTX, nil
+	return false, Transaction{}, nil
 }
 
 func (bc *Blockchain) FindUTXO(address []byte) ([]TXOutput, error) {
-  var (
-    txOUT   []TXOutput
-    tr	    []Transaction
-    err	    error
-    pubHash []byte
-    decoded []byte
-  )
+	var (
+		txOUT   []TXOutput
+		tr      []Transaction
+		err     error
+		pubHash string
+	)
 
-  decoded = utils.Base58Decode(address)
-  pubHash = decoded[1:len(decoded)-4]
+	pubHash = utils.AddressHashSPK(address)
 
-  if tr, err = bc.UnspentTransaction(pubHash); err != nil {
-    return txOUT, err
-  }
-
-  for _, tx := range tr {
-    for _, out := range tx.TXOutput {
-	txOUT = append(txOUT, out)
-    }
-  }
-
-  return txOUT, nil
-}
-
-func (bc *Blockchain) NewTransaction(from, to string, amount uint64) (*Transaction, error) {
-    var (
-	transaction *Transaction
-	unspentOut  = make(map[utils.Hash][]int)
-	err	    error
-	//change	    = make(map[utils.Hash]int)
-	decoded	    []byte
-	pubHash	    []byte
-	total	    uint64
-	inputs	    []TXInput
-	outputs	    []TXOutput
-	output	    TXOutput
-	hash	    utils.Hash
-    )
-
-    decoded = utils.Base58Decode([]byte(from))
-    pubHash = decoded[1:len(decoded)-4]
-
-    if unspentOut, _, total, err = bc.FindSpendable(pubHash, amount); err != nil {
-	return transaction, err
-    }
-
-    fmt.Println(unspentOut)
-    if total < amount {
-	return transaction, errors.New("Not enough funds")
-    }
-
-    //for hash, txOut := range unspentOut {
-	//for _, out := range txOut {
-	    //inputs = append(inputs, TXInput{TXid: hash[:], Vout: out, ScriptSig: from})
-	//}
-    //}
-
-    output = TXOutput{Value: amount}
-    output.Lock([]byte(to))
-    outputs = append(outputs, output)
-
-    if total > amount {
-      output = TXOutput{Value: total - (amount + MINING_RATE)}
-      output.Lock([]byte(from))
-      outputs = append(outputs, output)
-    }
-
-    transaction = &Transaction{1, hash, int32(len(inputs)), inputs, int32(len(outputs)), outputs}
-    transaction.SetID()
-
-    return transaction, nil
-}
-
-func (bc *Blockchain) FindSpendable(pubHash []byte, amount uint64) (map[utils.Hash][]int, map[utils.Hash]int, uint64, error) {
-    var (
-      unspentTX	  []Transaction
-      acumulated  uint64 = 0
-      err	  error
-      unspentOut  = make(map[utils.Hash][]int)
-      change	  = make(map[utils.Hash]int)
-    )
-
-    amount += MINING_RATE
-    if unspentTX, err = bc.UnspentTransaction(pubHash); err != nil {
-	return nil, nil, 0, err
-    }
-
-    Unspent:
-    for _, tx := range unspentTX {
-	for idxOut, out := range tx.TXOutput {
-	    acumulated += out.Value
-	    unspentOut[tx.ID] = append(unspentOut[tx.ID], idxOut)
-
-	    if acumulated > amount {
-		change[tx.ID] = idxOut
-		break Unspent
-	    }
+	if tr, err = bc.UnspentTransaction(pubHash); err != nil {
+		return txOUT, err
 	}
-    }
 
-    return unspentOut, change, acumulated, nil
+	for _, tx := range tr {
+		for _, out := range tx.TXOutput {
+			txOUT = append(txOUT, out)
+		}
+	}
+
+	return txOUT, nil
+}
+
+func (bc *Blockchain) NewTransaction(from, to []byte, amount uint64) (*Transaction, error) {
+	var (
+		transaction *Transaction
+		unspentOut  = make(map[utils.Hash][]int)
+		err         error
+		pubHash     string
+		total       uint64
+		inputs      []TXInput
+		outputs     []TXOutput
+		output      TXOutput
+		hash        utils.Hash
+	)
+
+	pubHash = utils.AddressHashSPK(from)
+
+	if unspentOut, _, total, err = bc.FindSpendable(pubHash, amount); err != nil {
+		return transaction, err
+	}
+
+	if total < amount {
+		return transaction, errors.New("Not enough funds")
+	}
+
+	for hash, txOut := range unspentOut {
+		for _, out := range txOut {
+			inputs = append(inputs, TXInput{TXid: hash, Vout: out})
+		}
+	}
+
+	output = TXOutput{Index: 0, Value: amount, Address: to}
+	output.Lock(to)
+	outputs = append(outputs, output)
+
+	if total > (amount + MINING_RATE) {
+		output = TXOutput{Index: 1, Value: total - (amount + MINING_RATE), Address: from}
+		output.Lock(from)
+		outputs = append(outputs, output)
+	}
+
+	transaction = &Transaction{1, hash, time.Now(), int32(len(inputs)), inputs, int32(len(outputs)), outputs}
+	transaction.SetID()
+
+	return transaction, nil
+}
+
+func (bc *Blockchain) FindSpendable(pubHash string, amount uint64) (map[utils.Hash][]int, map[utils.Hash]int, uint64, error) {
+	var (
+		unspentTX  []Transaction
+		acumulated uint64 = 0
+		err        error
+		unspentOut = make(map[utils.Hash][]int)
+		change     = make(map[utils.Hash]int)
+	)
+
+	amount += MINING_RATE
+	if unspentTX, err = bc.UnspentTransaction(pubHash); err != nil {
+		return nil, nil, 0, err
+	}
+
+Unspent:
+	for _, tx := range unspentTX {
+		for idxOut, out := range tx.TXOutput {
+			acumulated += out.Value
+			unspentOut[tx.ID] = append(unspentOut[tx.ID], idxOut)
+
+			if acumulated > amount {
+				change[tx.ID] = idxOut
+				break Unspent
+			}
+		}
+	}
+
+	return unspentOut, change, acumulated, nil
 }
 
 type BlockchainIterator struct {
@@ -272,7 +293,7 @@ func NewBlockchain(wa []byte) *Blockchain {
 	)
 
 	if valid = CheckValidAddress(wa); !valid {
-	  log.Fatalf("Invalid Wallet Address")
+		log.Fatalf("Invalid Wallet Address")
 	}
 
 	if db, err = bolt.Open(DBFILE, 0600, nil); err != nil {
