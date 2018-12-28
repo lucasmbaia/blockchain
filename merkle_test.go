@@ -5,7 +5,7 @@ import (
 )
 
 func Test_NewMerkleTree(t *testing.T) {
-	var ctbx = NewCoinbase([]byte(""), "coinbase transaction")
+	var ctbx = NewCoinbase([]byte(""), "coinbase transaction", 0)
 	var transactions []*Transaction
 	transactions = append(transactions, ctbx)
 

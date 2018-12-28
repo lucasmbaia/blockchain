@@ -9,7 +9,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	//"github.com/btcsuite/btcd/btcec"
 	"github.com/lucasmbaia/blockchain/utils"
 	"log"
 	"math/big"
@@ -41,6 +40,8 @@ type TXInput struct {
 	TXid      utils.Hash //identificador da transacao
 	Vout      int        //identifica uma saida especifica a ser gasta
 	ScriptSig ScriptSig  //fornece parametros de dados que satisfazem as condicoes do script pubkey
+	Coinbase  string
+	Sequence  string
 }
 
 type ScriptSig struct {
@@ -83,8 +84,7 @@ func DeserializeTransaction(t []byte) *Transaction {
 }
 
 func (tx *Transaction) IsCoinbase() bool {
-	return len(tx.TXInput) == 0
-	//return len(tx.TXInput) == 1 && len(tx.TXInput[0].TXid) == 0 && tx.TXInput[0].Vout == -1
+	return len(tx.TXInput) == 1 && len(tx.TXInput[0].TXid) == 0 && tx.TXInput[0].Vout == -1
 }
 
 func (txOut *TXOutput) Lock(address []byte) {
@@ -112,14 +112,22 @@ func (tx *Transaction) RawTransaction() string {
 		outputs string
 	)
 
-	inputs = strconv.FormatInt(int64(tx.TXInputCount), 16)
-	if len(inputs) == 1 {
-		inputs = fmt.Sprintf("0%s", inputs)
+	if tx.TXInputCount == 0 {
+		inputs = "00"
+	} else {
+		inputs = strconv.FormatInt(int64(tx.TXInputCount), 16)
+		if len(inputs) == 1 {
+			inputs = fmt.Sprintf("0%s", inputs)
+		}
 	}
 
-	outputs = strconv.FormatInt(int64(tx.TXOutputCount), 16)
-	if len(outputs) == 1 {
-		outputs = fmt.Sprintf("0%s", outputs)
+	if tx.TXOutputCount == 0 {
+		outputs = "00"
+	} else {
+		outputs = strconv.FormatInt(int64(tx.TXOutputCount), 16)
+		if len(outputs) == 1 {
+			outputs = fmt.Sprintf("0%s", outputs)
+		}
 	}
 
 	/*raw = append(raw, utils.ConvertUnsigned4Bytes(uint32(tx.Version)))  //four-byte version
@@ -157,8 +165,14 @@ func (tx *Transaction) RawTransaction() string {
 	raw = append(raw, inputs)                                          //total inputs of transaction
 
 	for _, input := range tx.TXInput {
-		raw = append(raw, utils.ReverseHash(input.TXid[:]))
-		raw = append(raw, utils.ConvertUnsigned4Bytes(uint32(input.Vout)))
+		if strings.Compare(hex.EncodeToString(input.TXid[:]), "0000000000000000000000000000000000000000000000000000000000000000") == 0 {
+			raw = append(raw, "0000000000000000000000000000000000000000000000000000000000000000")
+			raw = append(raw, utils.ConvertUnsigned4Bytes(uint32(input.Vout)))
+			raw = append(raw, fmt.Sprintf("04%s", input.Coinbase))
+		} else {
+			raw = append(raw, utils.ReverseHash(input.TXid[:]))
+			raw = append(raw, utils.ConvertUnsigned4Bytes(uint32(input.Vout)))
+		}
 
 		if (ScriptSig{}) != input.ScriptSig {
 			if input.ScriptSig.Hex != "" {
@@ -353,7 +367,7 @@ func ValidTransaction(tx *Transaction, bc *Blockchain) error {
 		var r = &big.Int{}
 		var s = &big.Int{}
 
-		if r, s, err = parseP2pkh(signature); err != nil {
+		if r, s, err = parseSignature(signature); err != nil {
 			return err
 		}
 
@@ -396,7 +410,7 @@ func parseScriptSig(scriptSig string) (string, string, error) {
 	return signature, cutePublicKey[4:], nil
 }
 
-func parseP2pkh(signature string) (*big.Int, *big.Int, error) {
+func parseSignature(signature string) (*big.Int, *big.Int, error) {
 	var (
 		r       = &big.Int{}
 		s       = &big.Int{}
@@ -424,17 +438,23 @@ func parseP2pkh(signature string) (*big.Int, *big.Int, error) {
 	return r, s, nil
 }
 
-func NewCoinbase(to []byte, data string) *Transaction {
-	var hash utils.Hash
+func NewCoinbase(to []byte, data string, height int64) *Transaction {
+	var (
+		hash        utils.Hash
+		heightBytes string
+	)
 
 	if data == "" {
 		data = fmt.Sprintf("Reward to '%s'", to)
 	}
 
+	heightBytes = utils.ConvertUnsigned4Bytes(uint32(height))
+
 	var txout = TXOutput{Index: 0, Value: REWARD, Address: to}
 	txout.Lock(to)
 
-	var tx = Transaction{1, hash, time.Now(), 0, []TXInput{}, 1, []TXOutput{txout}}
+	var txin = TXInput{Coinbase: fmt.Sprintf("03%s", heightBytes[:len(heightBytes)-2]), Vout: -1, Sequence: "00000000"}
+	var tx = Transaction{1, hash, time.Now(), 1, []TXInput{txin}, 1, []TXOutput{txout}}
 	tx.SetID()
 
 	return &tx

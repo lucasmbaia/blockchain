@@ -49,9 +49,9 @@ func (bc *Blockchain) AddBlock(data []byte) {
 		log.Fatalf("Error to add new block: %s\n", err)
 	}
 
-	ctbx = NewCoinbase(bc.wa, "Coinbase Transaction")
-
 	index++
+	ctbx = NewCoinbase(bc.wa, "Coinbase Transaction", index)
+
 	var newBlock = NewBlock(int32(index), []*Transaction{ctbx}, data, hash)
 
 	if err = bc.db.Update(func(tx *bolt.Tx) error {
@@ -304,7 +304,7 @@ func NewBlockchain(wa []byte) *Blockchain {
 		var bucket *bolt.Bucket = tx.Bucket([]byte(BLOCKS_BOCKET))
 
 		if bucket == nil {
-			var ctbx = NewCoinbase(wa, "Coinbase Transaction")
+			var ctbx = NewCoinbase(wa, "Coinbase Transaction", 0)
 			var genesis = NewGenesisBlock(ctbx)
 
 			if bucket, err = tx.CreateBucket([]byte(BLOCKS_BOCKET)); err != nil {
