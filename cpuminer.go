@@ -4,19 +4,29 @@ import (
 	"github.com/lucasmbaia/blockchain/utils"
 	"log"
 	"math/big"
+	"time"
+	"context"
 )
 
 const (
 	MAX_NONCE = ^uint32(0)
 )
 
+type Operations struct {
+  Quit	  context.Context
+  Resume  chan struct{}
+  Pause	  chan struct{}
+}
+
 func CpuMiner(bh *BlockHeader) (bool, utils.Hash) {
 	var (
 		difficult *big.Int
 		hash      utils.Hash
+		start	  time.Time
 	)
 
 	//difficult = CalcDifficult(bh.Bits)
+	start = time.Now()
 	difficult = CalcDifficultEasy(int(bh.Bits))
 
 	for i := uint32(0); i < MAX_NONCE; i++ {
@@ -24,12 +34,52 @@ func CpuMiner(bh *BlockHeader) (bool, utils.Hash) {
 		hash = bh.BlockHash()
 
 		if HashToBig(&hash).Cmp(difficult) <= 0 {
-			log.Println("#################### Block Mined ####################")
+			log.Printf("#################### Block Mined With HashRate %vHS ####################", float64(i) / time.Since(start).Seconds())
 			return true, hash
 		}
 	}
 
 	return false, hash
+}
+
+func CpuMinerControl(o Operations, bh *BlockHeader) (bool, utils.Hash) {
+	var (
+		difficult *big.Int
+		hash	  utils.Hash
+		start	  time.Time
+		i	  = uint32(0)
+	)
+
+	start = time.Now()
+	difficult = CalcDifficultEasy(int(bh.Bits))
+
+	for {
+		select {
+		case <-o.Quit.Done():
+			return false, hash
+		case <-o.Pause:
+			log.Println("PAUSE")
+			select {
+			case <-o.Quit.Done():
+				return false, hash
+			case <-o.Resume:
+				log.Println("RESUME")
+			}
+		default:
+			if i >= MAX_NONCE {
+				return false, hash
+			}
+
+			bh.Nonce = i
+			hash = bh.BlockHash()
+
+			if HashToBig(&hash).Cmp(difficult) <= 0 {
+				log.Printf("#################### Block Mined With HashRate %vHS ####################", float64(i) / time.Since(start).Seconds())
+				return true, hash
+			}
+			i++
+		}
+	}
 }
 
 func HashToBig(hash *utils.Hash) *big.Int {

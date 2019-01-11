@@ -32,15 +32,29 @@ func (b *Block) Serialize() []byte {
 }
 
 func HashTransactions(transactions []*Transaction) utils.Hash {
-  var (
-    txHash  [][]byte
-  )
+	var (
+		txHash  [][]byte
+	)
 
-  for _, tx := range transactions {
-    txHash = append(txHash, tx.ID[:])
-  }
+	for _, tx := range transactions {
+		txHash = append(txHash, tx.ID[:])
+	}
 
-  return utils.CalcHash(bytes.Join(txHash, []byte{}))
+	return utils.CalcHash(bytes.Join(txHash, []byte{}))
+}
+
+func (b *Block) CheckProcessedTransactions(tx []*Transaction) {
+	for idx, transaction := range tx {
+		for _, btx := range b.Transactions {
+			if bytes.Compare(transaction.ID[:], btx.ID[:]) == 0 {
+				if len(tx) -1 == idx {
+					tx = tx[:idx]
+				} else {
+					tx = append(tx[:idx], tx[idx+1:]...)
+				}
+			}
+		}
+	}
 }
 
 func Deserialize(b []byte) *Block {
@@ -64,12 +78,17 @@ func NewBlock(index int32, transactions []*Transaction, data []byte, prevBlockHa
 
 	var hash utils.Hash
 	var merkle *MerkleRoot
+	var valid bool
 
 	merkle = NewMerkleTree(transactions)
 	bh.MerkleRoot = merkle.MerkleNode.Hash
 	bh.HashTransactions = HashTransactions(transactions)
 
-	_, hash = CpuMiner(&bh)
+	valid, hash = CpuMiner(&bh)
+
+	if !valid {
+		return NewBlock(index, transactions, data, prevBlockHash)
+	}
 
 	return &Block{
 		Index:	      index,

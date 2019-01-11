@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"sync"
 )
 
 type SigHashType uint32
@@ -23,6 +24,11 @@ type SigHashType uint32
 const (
 	REWARD     uint64      = 2500000000
 	SigHashAll SigHashType = 0x1
+)
+
+var (
+  mutex			  = &sync.RWMutex{}
+  UnprocessedTransactions = make(map[utils.Hash]*Transaction)
 )
 
 type Transaction struct {
@@ -458,4 +464,20 @@ func NewCoinbase(to []byte, data string, height int64) *Transaction {
 	tx.SetID()
 
 	return &tx
+}
+
+func AppendUnprocessedTransactions(tx *Transaction) {
+	mutex.Lock()
+	if _, ok := UnprocessedTransactions[tx.ID]; !ok {
+		UnprocessedTransactions[tx.ID] = tx
+	}
+	mutex.Unlock()
+}
+
+func RemoveUnprocessedTransactions(tx *Transaction) {
+	mutex.Lock()
+	if _, ok := UnprocessedTransactions[tx.ID]; ok {
+		delete(UnprocessedTransactions, tx.ID)
+	}
+	mutex.Unlock()
 }

@@ -1,4 +1,4 @@
-package main
+package cli
 
 import (
 	"fmt"
@@ -18,6 +18,10 @@ func generateWallet() {
 	}
 
 	fmt.Printf("Private Key: %s\nAddress: %s\n", w.PrivateToHex(), string(w.Address))
+}
+
+func (c *CLI) Run() {
+    fmt.Println("PORRA")
 }
 
 /*func getBalance(private, address string) {
@@ -51,9 +55,9 @@ func generateWallet() {
 	fmt.Printf("Total of balance: %g\n", amount)
 }*/
 
-func main() {
-	var c = &CLI{}
+/*func main() {
+	//var c = &CLI{}
 	//generateWallet()
 	//getBalance("6704c183d5278523ad8a1eb88ba256ad1ea22222bda127fd5972f5acecdee835", "1CyssrDhEvZv2jXci6F5oueZwMXszm6kLs")
-	c.NewTransaction("6704c183d5278523ad8a1eb88ba256ad1ea22222bda127fd5972f5acecdee835", "1CyssrDhEvZv2jXci6F5oueZwMXszm6kLs", "1G1yPBfSeLRY2sSzLGNbAUWRFBgSv58F4r", 100000)
-}
+	newTransaction("6704c183d5278523ad8a1eb88ba256ad1ea22222bda127fd5972f5acecdee835", "1CyssrDhEvZv2jXci6F5oueZwMXszm6kLs", "1G1yPBfSeLRY2sSzLGNbAUWRFBgSv58F4r", 100000)
+}*/

@@ -10,8 +10,10 @@ import (
 func Test_NewBlockchain_Add_Block(t *testing.T) {
 	bc := NewBlockchain([]byte("1CyssrDhEvZv2jXci6F5oueZwMXszm6kLs"))
 
-	bc.AddBlock([]byte("Send 1 BTC to Lucas"))
-	bc.AddBlock([]byte("Send 2 more BTC to Lucas"))
+	for {
+	  bc.AddBlock([]byte("Send 1 BTC to Lucas"))
+      }
+	//bc.AddBlock([]byte("Send 2 more BTC to Lucas"))
 }
 
 func Test_Iterator_PrintBlochckain(t *testing.T) {

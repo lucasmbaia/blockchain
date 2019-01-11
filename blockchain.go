@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	DBFILE        = "/root/go/src/github.com/lucasmbaia/blockchain/blockchain.db"
+	DBFILE        = "/opt/blockchain.db"
 	BLOCKS_BOCKET = "blocks"
 	MINING_RATE   = 10000
 )
@@ -27,10 +27,12 @@ type Blockchain struct {
 
 func (bc *Blockchain) AddBlock(data []byte) {
 	var (
-		hash  utils.Hash
-		index int64
-		err   error
-		ctbx  *Transaction
+		hash	      utils.Hash
+		index	      int64
+		err	      error
+		ctbx	      *Transaction
+		lastBlock     *Block
+		transactions  []*Transaction
 	)
 
 	if err = bc.db.View(func(tx *bolt.Tx) error {
@@ -44,6 +46,9 @@ func (bc *Blockchain) AddBlock(data []byte) {
 			return err
 		}
 
+		var encode = bucket.Get(hash[:])
+		lastBlock = Deserialize(encode)
+
 		return nil
 	}); err != nil {
 		log.Fatalf("Error to add new block: %s\n", err)
@@ -51,6 +56,14 @@ func (bc *Blockchain) AddBlock(data []byte) {
 
 	index++
 	ctbx = NewCoinbase(bc.wa, "Coinbase Transaction", index)
+	transactions = append(transactions, ctbx)
+
+	for _, tx := range UnprocessedTransactions {
+		if err = ValidTransaction(tx, bc); err == nil {
+			transactions = append(transactions, tx)
+		}
+	}
+	lastBlock.CheckProcessedTransactions(transactions)
 
 	var newBlock = NewBlock(int32(index), []*Transaction{ctbx}, data, hash)
 
@@ -75,6 +88,10 @@ func (bc *Blockchain) AddBlock(data []byte) {
 	}); err != nil {
 		log.Fatalf("Error to add new block: %s\n", err)
 	}
+
+	for _, tx := range transactions {
+		RemoveUnprocessedTransactions(tx)
+	}
 }
 
 func (bc *Blockchain) UnspentTransaction(pubHash string) ([]Transaction, error) {
@@ -86,6 +103,7 @@ func (bc *Blockchain) UnspentTransaction(pubHash string) ([]Transaction, error) 
 		block     *Block
 		err       error
 		stop      = big.NewInt(0)
+		inputTX	  []TXInput
 	)
 
 	for {
@@ -94,6 +112,7 @@ func (bc *Blockchain) UnspentTransaction(pubHash string) ([]Transaction, error) 
 		}
 
 		for _, tx := range block.Transactions {
+			inputTX = append(inputTX, tx.TXInput...)
 			txID = hex.EncodeToString(tx.ID[:])
 		Outputs:
 			for idx, out := range tx.TXOutput {
@@ -109,20 +128,34 @@ func (bc *Blockchain) UnspentTransaction(pubHash string) ([]Transaction, error) 
 					unspentTX = append(unspentTX, *tx)
 				}
 			}
-
-			/*if !tx.IsCoinbase() {
-				fmt.Println("NAO ERA PRA ENTRAR AQUI")
-				for _, in := range tx.TXInput {
-					if in.ScriptSig == string(pubHash) {
-						var inTxID = hex.EncodeToString(in.TXid)
-						spentTX[inTxID] = append(spentTX[inTxID], in.Vout)
-					}
-				}
-			}*/
 		}
 
 		if HashToBig(&block.Header.PrevBlock).Cmp(stop) == 0 {
 			break
+		}
+	}
+
+	for idx, utx := range unspentTX {
+		for _, itx := range inputTX {
+			if bytes.Compare(itx.TXid[:], utx.ID[:]) == 0 {
+				if len(unspentTX[idx].TXOutput) == 1 {
+					if len(unspentTX) == 1 {
+						unspentTX = []Transaction{}
+					} else {
+						if len(unspentTX)-1 == idx {
+							unspentTX = unspentTX[:idx]
+						} else {
+							unspentTX = append(unspentTX[:idx], unspentTX[idx+1:]...)
+						}
+					}
+				} else {
+					if len(unspentTX[idx].TXOutput)-1 == itx.Vout {
+						unspentTX[idx].TXOutput = unspentTX[idx].TXOutput[:itx.Vout]
+					} else {
+						unspentTX[idx].TXOutput = append(unspentTX[idx].TXOutput[:itx.Vout], unspentTX[idx].TXOutput[itx.Vout+1:]...)
+					}
+				}
+			}
 		}
 	}
 
@@ -238,7 +271,7 @@ func (bc *Blockchain) FindSpendable(pubHash string, amount uint64) (map[utils.Ha
 		return nil, nil, 0, err
 	}
 
-Unspent:
+	Unspent:
 	for _, tx := range unspentTX {
 		for idxOut, out := range tx.TXOutput {
 			acumulated += out.Value
@@ -296,9 +329,12 @@ func NewBlockchain(wa []byte) *Blockchain {
 		log.Fatalf("Invalid Wallet Address")
 	}
 
+	fmt.Println("ANTES DO OPEN")
 	if db, err = bolt.Open(DBFILE, 0600, nil); err != nil {
 		log.Fatalf("Error to create blockchain: %s\n", err)
 	}
+
+	fmt.Println("PASSOU DO OPEN")
 
 	if err = db.Update(func(tx *bolt.Tx) error {
 		var bucket *bolt.Bucket = tx.Bucket([]byte(BLOCKS_BOCKET))
