@@ -8,37 +8,48 @@ import (
 	"bufio"
 	"io"
 	"encoding/gob"
+	"bytes"
+	"context"
+	"fmt"
+	"encoding/json"
 )
 
 const (
-	DEFAULT_PORT_SERVER = ":5688"
+	DEFAULT_PORT_SERVER = ":5689"
 )
 
 var (
-	index int64
+	index int32
 )
 
 type gossip struct {
-	option	string
-	body	[]byte
+	Option	string
+	Body	[]byte
 }
 
 type Client struct {
-	operation   blockchain.Operation
+	operation   *Operation
 	connection  []*connection
 	address	    []byte
 
-	block	    chan blockchain.Block
+	block	    chan *blockchain.Block
 	transaction chan *blockchain.Transaction
+	mining	    chan struct{}
+}
+
+type Operation struct {
+	Done	chan struct{}
+	Resume	chan struct{}
+	Pause	chan struct{}
 }
 
 type connection struct {
 	write	*bufio.Writer
 	read	*bufio.Reader
-	conn	*net.Conn
+	conn	net.Conn
 }
 
-func (g *Gossip) Serialize() ([]byte, error) {
+func (g *gossip) Serialize() ([]byte, error) {
 	var result bytes.Buffer
 	var encoder *gob.Encoder = gob.NewEncoder(&result)
 
@@ -49,8 +60,8 @@ func (g *Gossip) Serialize() ([]byte, error) {
 	return result.Bytes(), nil
 }
 
-func DeserializeGossip(b []byte) (*Gossip, error) {
-	var gossip Gossip
+func DeserializeGossip(b []byte) (*gossip, error) {
+	var gossip gossip
 	var decoder *gob.Decoder = gob.NewDecoder(bytes.NewReader(b))
 
 	if err := decoder.Decode(&gossip); err != nil {
@@ -63,12 +74,12 @@ func DeserializeGossip(b []byte) (*Gossip, error) {
 func StartNode(ctx context.Context, address []byte, nodes []string) {
 	var client = &Client{
 		address:      address,
-		block:	      make(chan blockchain.Block, 1),
-		transaction:  make(chan blockchain.Transaction, 1),
+		block:	      make(chan *blockchain.Block, 1),
+		transaction:  make(chan *blockchain.Transaction, 1),
 	}
 
 	for _, node := range nodes {
-		var c = connection(node)
+		var c = dial(node)
 
 		client.connection = append(client.connection, c)
 	}
@@ -79,51 +90,92 @@ func StartNode(ctx context.Context, address []byte, nodes []string) {
 	<-ctx.Done()
 }
 
+func (c *Client) getHistory() {
+
+}
+
 func (c *Client) operations() {
+	var (
+		err error
+	)
+
 	for {
 		select {
-		case <-c.block:
+		case block := <-c.block:
+			if len(c.connection) > 0 {
+				var body []byte
+				var g = gossip{
+					Option:	"block",
+					Body:	block.Serialize(),
+				}
+
+				if body, err = json.Marshal(g); err == nil {
+					body = append(body, byte('\n'))
+					for _, conn := range c.connection{
+						conn.conn.Write(body)
+					}
+				} else {
+					log.Printf("Error to serializer: %s\n", err.Error())
+				}
+			}
+
+			fmt.Printf("%x\n", block.Hash)
+			go c.mining(block.Hash)
 		case <-c.transaction:
 		}
 	}
 }
 
 func (c *Client) mining(hash utils.Hash) {
+	fmt.Println("MINERANDO")
 	var (
 		transactions  []*blockchain.Transaction
-		ctbx	      *Transaction
+		ctbx	      *blockchain.Transaction
 		block	      *blockchain.Block
+		operations     blockchain.Operations
+		ctx	      context.Context
+		cancel	      context.CancelFunc
 	)
 
+	ctx, cancel = context.WithCancel(context.Background())
+	operations = blockchain.Operations{
+		Quit:	ctx,
+		Resume:	make(chan struct{}),
+		Pause:	make(chan struct{}),
+	}
+
 	go func() {
-		select {
-		case <-c.operation.Quit():
-			return
+		for {
+			select {
+			case <-c.operation.Done:
+				cancel()
+				return
+			case <-c.operation.Resume:
+				operations.Resume <- struct{}{}
+			case <-c.operation.Pause:
+				operations.Resume <- struct{}{}
+			}
 		}
 	}()
 
-	ctbx = blockchain.NewCoinbase(c.address, "Coinbase Transaction", index)
+	ctbx = blockchain.NewCoinbase(c.address, "Coinbase Transaction", int64(index))
 	transactions = append(transactions, ctbx)
 
-	block = blockchain.NewBlock(c.operation, transactions, []byte(""), hash)
+	block = blockchain.NewBlock(operations, index, transactions, []byte(""), hash)
 	c.block <- block
 	return
 }
 
 func (c *Client) handleConnection() {
-	var (
-		ctx	  context.Context
-		cancel	  context.CancelFunc
-	)
+	var hash utils.Hash
 
-	c.operation = blockchain.Operation{
+	c.operation = &Operation{
+		Done:	make(chan struct{}),
 		Resume:	make(chan struct{}),
 		Pause:	make(chan struct{}),
 	}
 
-	ctx, cancel = context.WithCancel(context.Background())
-	c.Quit = ctx
-	go c.mining()
+	go c.mining(hash)
 
 	for _, cli := range c.connection {
 		defer func() {
@@ -146,23 +198,24 @@ func (c *Client) handleConnection() {
 				return
 			}
 
-			var gossip *Gossip
+			var gossip *gossip
 
 			if gossip, err = DeserializeGossip(option); err != nil {
 				log.Printf("Error to deserialize gossip: %s\n", err.Error())
 				continue
 			}
 
-			switch gossip.action {
+			switch gossip.Option {
 			case "block":
-				/*c.operation.Pause <- struct{}{}
+				c.operation.Pause <- struct{}{}
 
-				var block = blockchain.Deserialize(gossip.body)*/
-				cancel()
+				var block = blockchain.Deserialize(gossip.Body)
 
-				ctx, cancel = context.WithCancel(context.Background())
-				c.Quit = ctx
+				c.operation.Done <- struct{}{}
 				go c.mining(block.Hash)
+			case "search_transaction":
+				//var transaction = blockchain.DeserializeTransaction(gossip.body)
+
 			default:
 				log.Printf("Invalid Option")
 			}
@@ -170,9 +223,9 @@ func (c *Client) handleConnection() {
 	}
 }
 
-func connection(addr string) *Client {
+func dial(addr string) *connection {
 	var (
-		client	*Client
+		client	*connection
 		err	error
 		conn	net.Conn
 	)
@@ -180,12 +233,11 @@ func connection(addr string) *Client {
 	if conn, err = net.Dial("tcp", addr); err != nil {
 		panic(err)
 	}
-	defer conn.Close()
 
-	client = &Client{
+	client = &connection{
 		write:	bufio.NewWriter(conn),
 		read:	bufio.NewReader(conn),
-		conn:	&conn,
+		conn:	conn,
 	}
 
 	return client

@@ -68,7 +68,7 @@ func Deserialize(b []byte) *Block {
 	return &block
 }
 
-func NewBlock(index int32, transactions []*Transaction, data []byte, prevBlockHash utils.Hash) *Block {
+func NewBlock(operations Operations, index int32, transactions []*Transaction, data []byte, prevBlockHash utils.Hash) *Block {
 	bh := BlockHeader{
 		Version:   1,
 		PrevBlock: prevBlockHash,
@@ -84,10 +84,11 @@ func NewBlock(index int32, transactions []*Transaction, data []byte, prevBlockHa
 	bh.MerkleRoot = merkle.MerkleNode.Hash
 	bh.HashTransactions = HashTransactions(transactions)
 
-	valid, hash = CpuMiner(&bh)
+	//valid, hash = CpuMiner(&bh)
+	valid, hash = CpuMinerControl(operations, &bh)
 
 	if !valid {
-		return NewBlock(index, transactions, data, prevBlockHash)
+		return NewBlock(operations, index, transactions, data, prevBlockHash)
 	}
 
 	return &Block{
@@ -101,5 +102,7 @@ func NewBlock(index int32, transactions []*Transaction, data []byte, prevBlockHa
 
 func NewGenesisBlock(coinbase *Transaction) *Block {
 	var prevBlockHash utils.Hash
-	return NewBlock(0, []*Transaction{coinbase}, []byte("Genesis Block"), prevBlockHash)
+	var operations Operations
+
+	return NewBlock(operations, 0, []*Transaction{coinbase}, []byte("Genesis Block"), prevBlockHash)
 }
