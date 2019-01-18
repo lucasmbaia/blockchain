@@ -7,7 +7,6 @@ import (
 	"runtime"
 	"testing"
 	"time"
-	"context"
 )
 
 const (
@@ -85,10 +84,8 @@ func Test_Cpu_Control_Miner(t *testing.T) {
 		Timestamp: td,
 	}
 
-	ctx, _ := context.WithCancel(context.Background())
-
 	operations = Operations{
-		Quit:	ctx,
+		Done:	make(chan struct{}),
 		Resume:	make(chan struct{}),
 		Pause:	make(chan struct{}),
 	}

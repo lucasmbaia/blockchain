@@ -5,7 +5,6 @@ import (
 	"log"
 	"math/big"
 	"time"
-	"context"
 )
 
 const (
@@ -13,9 +12,9 @@ const (
 )
 
 type Operations struct {
-  Quit	  context.Context
-  Resume  chan struct{}
-  Pause	  chan struct{}
+	Done  chan struct{}
+	Resume  chan struct{}
+	Pause	  chan struct{}
 }
 
 func CpuMiner(bh *BlockHeader) (bool, utils.Hash) {
@@ -55,16 +54,18 @@ func CpuMinerControl(o Operations, bh *BlockHeader) (bool, utils.Hash) {
 
 	for {
 		select {
-		case <-o.Quit.Done():
-			return false, hash
 		case <-o.Pause:
 			log.Println("PAUSE")
 			select {
-			case <-o.Quit.Done():
+			case <-o.Done:
+				log.Println("DONE")
 				return false, hash
 			case <-o.Resume:
 				log.Println("RESUME")
 			}
+		case <-o.Done:
+			log.Println("DONE")
+			return false, hash
 		default:
 			if i >= MAX_NONCE {
 				return false, hash

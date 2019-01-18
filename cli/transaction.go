@@ -28,7 +28,7 @@ func (c *CLI) newTransaction(private, from, to string, value float64) {
 	}
 
 	if err = transmit(gossip{
-		Option:	"local_transaction",
+		Option:	"transaction",
 		Body:	body,
 	}); err != nil {
 		panic(fmt.Sprintf("Deu ruim: %s\n", err.Error()))

@@ -53,7 +53,7 @@ func (bc *Blockchain) AddBlock(block *Block) error {
 	return nil
 }
 
-func (bc *Blockchain) NewBlock(data []byte) {
+func (bc *Blockchain) NewBlock(operations Operations, data []byte) *Block {
 	var (
 		hash	      utils.Hash
 		index	      int64
@@ -61,7 +61,6 @@ func (bc *Blockchain) NewBlock(data []byte) {
 		ctbx	      *Transaction
 		lastBlock     *Block
 		transactions  []*Transaction
-		operations    Operations
 	)
 
 	if err = bc.db.View(func(tx *bolt.Tx) error {
@@ -98,8 +97,7 @@ func (bc *Blockchain) NewBlock(data []byte) {
 	}
 	lastBlock.CheckProcessedTransactions(transactions)
 
-	var newBlock = NewBlock(operations, int32(index), []*Transaction{ctbx}, data, hash)
-	bc.AddBlock(newBlock)
+	return NewBlock(operations, int32(index), []*Transaction{ctbx}, data, hash)
 }
 
 /*func (bc *Blockchain) AddBlock(data []byte) {

@@ -11,7 +11,7 @@ func Test_NewBlockchain_Add_Block(t *testing.T) {
 	bc := NewBlockchain([]byte("1CyssrDhEvZv2jXci6F5oueZwMXszm6kLs"))
 
 	for {
-		bc.NewBlock([]byte("Send 1 BTC to Lucas"))
+		bc.AddBlock(bc.NewBlock(Operations{}, []byte("Send 1 BTC to Lucas")))
 	}
 	//bc.AddBlock([]byte("Send 2 more BTC to Lucas"))
 }

@@ -2,14 +2,31 @@ package server
 
 import (
 	"encoding/json"
-	//"encoding/gob"
-	//"bytes"
+	"encoding/gob"
+	"bytes"
 )
 
 type Gossip struct {
 	Option	string
 	Error	error
 	Body	[]byte
+}
+
+func Serialize(i interface{}) ([]byte, error) {
+	var (
+		result	bytes.Buffer
+		err	error
+	)
+
+	var encoder *gob.Encoder = gob.NewEncoder(&result)
+
+	err = encoder.Encode(i)
+	return result.Bytes(), err
+}
+
+func Deserialize(i interface{}, input []byte) error {
+	var decoder *gob.Decoder = gob.NewDecoder(bytes.NewReader(input))
+	return decoder.Decode(i)
 }
 
 func EncodeGossip(g Gossip) ([]byte, error) {

@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"encoding/json"
 	"sync"
+	"time"
 )
 
 const (
@@ -178,6 +179,16 @@ func (c *Client) getHistory() {
 	}
 
 	go c.mining(hash)
+
+	ticker := time.NewTicker(2 * time.Second)
+	go func() {
+		for _ = range ticker.C {
+			c.operation.Pause <- struct{}{}
+			c.operation.Done <- struct{}{}
+
+			go c.mining(hash)
+		}
+	}()
 }
 
 func (c *Client) operations() {
@@ -233,13 +244,10 @@ func (c *Client) mining(hash utils.Hash) {
 		ctbx		*blockchain.Transaction
 		block		*blockchain.Block
 		operations	blockchain.Operations
-		ctx		context.Context
-		cancel		context.CancelFunc
 	)
 
-	ctx, cancel = context.WithCancel(context.Background())
 	operations = blockchain.Operations{
-		Quit:	ctx,
+		Done:	make(chan struct{}),
 		Resume:	make(chan struct{}),
 		Pause:	make(chan struct{}),
 	}
@@ -248,12 +256,12 @@ func (c *Client) mining(hash utils.Hash) {
 		for {
 			select {
 			case <-c.operation.Done:
-				cancel()
+				operations.Done <- struct{}{}
 				return
 			case <-c.operation.Resume:
 				operations.Resume <- struct{}{}
 			case <-c.operation.Pause:
-				operations.Resume <- struct{}{}
+				operations.Pause <- struct{}{}
 			}
 		}
 	}()
@@ -304,6 +312,7 @@ func (c *Client) handleConnection() {
 
 			switch gossip.Option {
 			case "block":
+				fmt.Println("BLOCK PORRA")
 				c.operation.Pause <- struct{}{}
 
 				var block = blockchain.Deserialize(gossip.Body)
@@ -327,6 +336,8 @@ func (c *Client) handleConnection() {
 				} else {
 					log.Printf("Error to deserialize block: %s\n", err.Error())
 				}
+			case "transaction":
+				fmt.Println("TRANSACTION")
 			default:
 				log.Printf("Invalid Option")
 			}

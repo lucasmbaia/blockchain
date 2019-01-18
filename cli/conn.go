@@ -3,7 +3,7 @@ package cli
 import (
 	"net"
 	"encoding/json"
-	"fmt"
+	//"fmt"
 	"bufio"
 	"io"
 )
@@ -79,7 +79,14 @@ func response(conn net.Conn, done chan struct{}, errc chan error) {
 			return
 		}
 
-		switch g.Option {
+		if g.Error != nil {
+			errc <- err
+		} else {
+			done <- struct{}{}
+		}
+
+		return
+		/*switch g.Option {
 		case "local_transaction":
 			if g.Error != nil {
 				errc <- err
@@ -88,7 +95,7 @@ func response(conn net.Conn, done chan struct{}, errc chan error) {
 			}
 
 			return
-		}
+		}*/
 	}
 }
 

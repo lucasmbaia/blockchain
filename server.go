@@ -31,6 +31,9 @@ type server struct {
 	operation   *operation
 	connections map[string]*connection
 	wcAddress   []byte
+	bc	    *Blockchain
+
+	block	    chan *Block
 }
 
 type operation struct {
@@ -87,11 +90,11 @@ func DeserializeInfos(b []byte) (*Infos, error) {
 	return &infos*/
 }
 
-func (s *server) removeNode(node string) {
+func (s *server) removeNode(node string, port int) {
 	if node != "" {
 		s.Lock()
-		if _, ok := s.connections[node]; ok {
-			delete(s.connections, node)
+		if _, ok := s.connections[fmt.Sprintf("%s:%d", node, port)]; ok {
+			delete(s.connections, fmt.Sprintf("%s:%d", node, port))
 		}
 		s.Unlock()
 	}
@@ -103,28 +106,87 @@ func (s *server) replyToNodes(g gossip, exception string) error {
 		err   error
 	)
 
-	if body, err = encodeGossip(g); err != nil {
-		return err
-	}
+	if len(s.connections) > 0 {
+		if body, err = encodeGossip(g); err != nil {
+			return err
+		}
 
-	s.Lock()
-	for node, connection := range s.connections {
-		if node != exception {
-			if _, err = connection.conn.Write(body); err != nil {
-				return err
+		s.Lock()
+		for node, connection := range s.connections {
+			if node != exception {
+				if _, err = connection.conn.Write(body); err != nil {
+					s.Unlock()
+					return err
+				}
 			}
 		}
+		s.Unlock()
 	}
-	s.Unlock()
 
 	return nil
+}
+
+func (s *server) operations() {
+	var err error
+
+	for {
+		select {
+		case block := <-s.block:
+			fmt.Println("PORRAAA")
+			if err = s.replyToNodes(gossip{
+				Option: "block",
+				Body:	block.Serialize(),
+			}, ""); err != nil {
+				log.Printf("Error to reply transaction to nodes: %s\n", err)
+			}
+
+			go s.mining()
+		}
+	}
+}
+
+func (s *server) mining() {
+	fmt.Println("MINING")
+	var (
+		block *Block
+		operations      Operations
+		//err		error
+	)
+
+	operations = Operations{
+		Done:	make(chan struct{}),
+		Resume: make(chan struct{}),
+		Pause:  make(chan struct{}),
+	}
+
+	go func() {
+		for {
+			select {
+			case <-s.operation.done:
+				operations.Done <- struct{}{}
+				return
+			case <-s.operation.resume:
+				operations.Resume <- struct{}{}
+			case <-s.operation.pause:
+				operations.Pause <- struct{}{}
+			}
+		}
+	}()
+
+	block = s.bc.NewBlock(operations, []byte(""))
+	s.block <- block
+	/*if err = s.bc.AddBlock(block); err == nil {
+		s.block <- block
+	} else {
+		log.Printf("Error to add block: %s\n", err)
+	}*/
 }
 
 func (s *server) handleConnection(c *connection, bc *Blockchain) {
 	defer func() {
 		if addr, ok := c.conn.RemoteAddr().(*net.TCPAddr); ok {
 			log.Printf("Connection Close if node IP %s", addr.IP.String())
-			s.removeNode(addr.IP.String())
+			s.removeNode(addr.IP.String(), addr.Port)
 		}
 		c.conn.Close()
 	}()
@@ -181,20 +243,33 @@ func (s *server) handleConnection(c *connection, bc *Blockchain) {
 				c.conn.Write(encoded)
 			}
 		case "transaction":
-		case "local_transaction":
 			var infos *Infos
 
 			if infos, err = DeserializeInfos(g.Body); err != nil {
-				fmt.Println(err)
+				sendReply(c, gossip{Option: "local_transaction", Error: err})
+				break
 			}
 
 			if err = s.validTransaction(infos, bc); err != nil {
-				fmt.Println(err)
+				sendReply(c, gossip{Option: "local_transaction", Error: err})
+				break
 			}
 
-			body, _ := encodeGossip(gossip{Option: "local_transaction"})
-			c.conn.Write(body)
-			fmt.Println("TRANSACTION")
+			sendReply(c, gossip{Option: "local_transaction"})
+			s.replyToNodes(g, fmt.Sprintf("%s:%d", c.conn.RemoteAddr().(*net.TCPAddr).IP.String(), c.conn.RemoteAddr().(*net.TCPAddr).Port))
+		case "block":
+			fmt.Println("BLOCK")
+			//s.replyToNodes(g, "")
+		}
+	}
+}
+
+func sendReply(c *connection, g gossip) {
+	if body, err := encodeGossip(g); err != nil {
+		log.Printf(fmt.Sprintf("Error to encode gossip: %s\n", err.Error()))
+	} else {
+		if _, err := c.conn.Write(body); err != nil {
+			log.Printf(fmt.Sprintf("Error to write response: %s\n", err.Error()))
 		}
 	}
 }
@@ -275,8 +350,10 @@ func StartFullNode(ctx context.Context, address []byte, nodes []string) {
 	defer l.Close()
 
 	s = &server{
+		bc:	      bc,
 		wcAddress:    address,
 		connections:  make(map[string]*connection),
+		block:	      make(chan *Block, 1),
 		operation:    &operation{
 			done:	make(chan struct{}),
 			resume: make(chan struct{}),
@@ -298,13 +375,15 @@ func StartFullNode(ctx context.Context, address []byte, nodes []string) {
 			client.read = bufio.NewReader(client.conn)
 
 			s.Lock()
-			s.connections[client.conn.RemoteAddr().(*net.TCPAddr).IP.String()] = client
+			s.connections[fmt.Sprintf("%s:%d", client.conn.RemoteAddr().(*net.TCPAddr).IP.String(), client.conn.RemoteAddr().(*net.TCPAddr).Port)] = client
 			s.Unlock()
 
 			go s.handleConnection(client, bc)
 		}
 	}()
 
+	go s.operations()
+	//go s.mining()
 	<-ctx.Done()
 }
 
