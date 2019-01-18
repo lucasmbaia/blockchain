@@ -21,7 +21,7 @@ func generateWallet() {
 }
 
 func (c *CLI) Run() {
-    fmt.Println("PORRA")
+	c.newTransaction("6704c183d5278523ad8a1eb88ba256ad1ea22222bda127fd5972f5acecdee835", "1CyssrDhEvZv2jXci6F5oueZwMXszm6kLs", "1G1yPBfSeLRY2sSzLGNbAUWRFBgSv58F4r", 0.01)
 }
 
 /*func getBalance(private, address string) {

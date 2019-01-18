@@ -11,8 +11,8 @@ func Test_NewBlockchain_Add_Block(t *testing.T) {
 	bc := NewBlockchain([]byte("1CyssrDhEvZv2jXci6F5oueZwMXszm6kLs"))
 
 	for {
-	  bc.AddBlock([]byte("Send 1 BTC to Lucas"))
-      }
+		bc.NewBlock([]byte("Send 1 BTC to Lucas"))
+	}
 	//bc.AddBlock([]byte("Send 2 more BTC to Lucas"))
 }
 
@@ -20,11 +20,14 @@ func Test_Iterator_PrintBlochckain(t *testing.T) {
 	var bc = NewBlockchain([]byte("1CyssrDhEvZv2jXci6F5oueZwMXszm6kLs"))
 	var bci = bc.Iterator()
 	var stop = big.NewInt(0)
+	var count = 0
 
 	for {
 		block, _ := bci.Next()
 
 		fmt.Printf("Block Index: %d, Block Hash: %x, Block Data: %s, Block Prev. Hash: %x, Block Bits: %d, Block Create: %s, Block Nonce: %d\n", block.Index, block.Hash, block.Data, block.Header.PrevBlock[:], block.Header.Bits, block.Header.Timestamp, block.Header.Nonce)
+
+		fmt.Println(bc.ValidBlock(block))
 
 		for _, transactions := range block.Transactions {
 			fmt.Printf("Transaction ID: %x\n", transactions.ID)
@@ -33,7 +36,10 @@ func Test_Iterator_PrintBlochckain(t *testing.T) {
 		if HashToBig(&block.Header.PrevBlock).Cmp(stop) == 0 {
 			break
 		}
+		count++
 	}
+
+	fmt.Println(count)
 }
 
 func Test_UnspentTransaction(t *testing.T) {

@@ -12,6 +12,7 @@ import (
 	"context"
 	"fmt"
 	"encoding/json"
+	"sync"
 )
 
 const (
@@ -19,7 +20,11 @@ const (
 )
 
 var (
-	index int32
+	mutex	      = &sync.RWMutex{}
+	index	      int32
+	history	      = make(chan History)
+	blockHistory  = make(chan *blockchain.Block)
+	blocks	      []*blockchain.Block
 )
 
 type gossip struct {
@@ -34,13 +39,18 @@ type Client struct {
 
 	block	    chan *blockchain.Block
 	transaction chan *blockchain.Transaction
-	mining	    chan struct{}
 }
 
 type Operation struct {
 	Done	chan struct{}
 	Resume	chan struct{}
 	Pause	chan struct{}
+}
+
+type History struct {
+	Index int32
+	Hash  utils.Hash
+	Node  string
 }
 
 type connection struct {
@@ -76,7 +86,14 @@ func StartNode(ctx context.Context, address []byte, nodes []string) {
 		address:      address,
 		block:	      make(chan *blockchain.Block, 1),
 		transaction:  make(chan *blockchain.Transaction, 1),
+		operation:    &Operation{
+			Done:   make(chan struct{}),
+			Resume: make(chan struct{}),
+			Pause:  make(chan struct{}),
+		},
 	}
+
+	go client.listen()
 
 	for _, node := range nodes {
 		var c = dial(node)
@@ -86,12 +103,81 @@ func StartNode(ctx context.Context, address []byte, nodes []string) {
 
 	go client.handleConnection()
 	go client.operations()
+	go client.getHistory()
 
 	<-ctx.Done()
 }
 
 func (c *Client) getHistory() {
+	var (
+		wg	  sync.WaitGroup
+		hash	  utils.Hash
+		done	  = make(chan struct{})
+		body	  []byte
+		err	  error
+		nodes	  = make(map[string]net.Conn)
+		master  string
+		b	  []*blockchain.Block
+	)
 
+	if body, err = encodeGossip(gossip{Option: "sizeof_chain"}); err != nil {
+		panic(err)
+	}
+
+	wg.Add(len(c.connection))
+	go func() {
+		go func() {
+			for {
+				select {
+				case h := <-history:
+					if index < h.Index {
+						index = h.Index
+						hash = h.Hash
+						master = h.Node
+					}
+					wg.Done()
+				case <-done:
+					return
+				}
+			}
+		}()
+
+		for _, conn := range c.connection {
+			conn.conn.Write(body)
+			nodes[conn.conn.RemoteAddr().(*net.TCPAddr).IP.String()] = conn.conn
+		}
+	}()
+	wg.Wait()
+	done <- struct{}{}
+
+	wg.Add(int(index) + 1)
+	go func() {
+		go func() {
+			for {
+				select {
+				case block := <-blockHistory:
+					b = append(b, block)
+					wg.Done()
+				case <-done:
+					return
+				}
+			}
+		}()
+
+		if body, err = encodeGossip(gossip{Option: "history_blocks"}); err != nil {
+			panic(err)
+		}
+
+		nodes[master].Write(body)
+	}()
+	wg.Wait()
+	done <- struct{}{}
+
+	for i := len(b) - 1; i >= 0; i-- {
+		blocks = append(blocks, b[i])
+	}
+
+	go c.mining(hash)
 }
 
 func (c *Client) operations() {
@@ -121,7 +207,21 @@ func (c *Client) operations() {
 
 			fmt.Printf("%x\n", block.Hash)
 			go c.mining(block.Hash)
-		case <-c.transaction:
+		case transaction := <-c.transaction:
+			if len(c.connection) > 0 {
+				var body []byte
+
+				if body, err = encodeGossip(gossip{
+					Option: "transaction",
+					Body:	transaction.Serialize(),
+				}); err == nil {
+					for _, conn := range c.connection{
+						conn.conn.Write(body)
+					}
+				} else {
+					fmt.Printf("Error to send transaction gossip: %s\n", err.Error())
+				}
+			}
 		}
 	}
 }
@@ -129,12 +229,12 @@ func (c *Client) operations() {
 func (c *Client) mining(hash utils.Hash) {
 	fmt.Println("MINERANDO")
 	var (
-		transactions  []*blockchain.Transaction
-		ctbx	      *blockchain.Transaction
-		block	      *blockchain.Block
-		operations     blockchain.Operations
-		ctx	      context.Context
-		cancel	      context.CancelFunc
+		transactions	[]*blockchain.Transaction
+		ctbx		*blockchain.Transaction
+		block		*blockchain.Block
+		operations	blockchain.Operations
+		ctx		context.Context
+		cancel		context.CancelFunc
 	)
 
 	ctx, cancel = context.WithCancel(context.Background())
@@ -161,22 +261,19 @@ func (c *Client) mining(hash utils.Hash) {
 	ctbx = blockchain.NewCoinbase(c.address, "Coinbase Transaction", int64(index))
 	transactions = append(transactions, ctbx)
 
+	for _, tx := range blockchain.UnprocessedTransactions {
+		if err := tx.ValidTransaction(getTransactionsInBlocks(tx)); err == nil {
+			transactions = append(transactions, tx)
+		}
+	}
+	blocks[len(blocks) - 1].CheckProcessedTransactions(transactions)
+
 	block = blockchain.NewBlock(operations, index, transactions, []byte(""), hash)
 	c.block <- block
 	return
 }
 
 func (c *Client) handleConnection() {
-	var hash utils.Hash
-
-	c.operation = &Operation{
-		Done:	make(chan struct{}),
-		Resume:	make(chan struct{}),
-		Pause:	make(chan struct{}),
-	}
-
-	go c.mining(hash)
-
 	for _, cli := range c.connection {
 		defer func() {
 			if addr, ok := cli.conn.RemoteAddr().(*net.TCPAddr); ok {
@@ -200,7 +297,7 @@ func (c *Client) handleConnection() {
 
 			var gossip *gossip
 
-			if gossip, err = DeserializeGossip(option); err != nil {
+			if err = json.Unmarshal(option[:len(option)-1], &gossip); err != nil {
 				log.Printf("Error to deserialize gossip: %s\n", err.Error())
 				continue
 			}
@@ -213,9 +310,23 @@ func (c *Client) handleConnection() {
 
 				c.operation.Done <- struct{}{}
 				go c.mining(block.Hash)
-			case "search_transaction":
-				//var transaction = blockchain.DeserializeTransaction(gossip.body)
+			case "sizeof_chain":
+				var h History
 
+				if err = json.Unmarshal(gossip.Body, &h); err == nil {
+					h.Node = cli.conn.RemoteAddr().(*net.TCPAddr).IP.String()
+					history <- h
+				} else {
+					log.Printf("Error to deserialize history: %s\n", err.Error())
+				}
+			case "history_blocks":
+				var b blockchain.Block
+
+				if err = json.Unmarshal(gossip.Body, &b); err == nil {
+					blockHistory <- &b
+				} else {
+					log.Printf("Error to deserialize block: %s\n", err.Error())
+				}
 			default:
 				log.Printf("Invalid Option")
 			}
@@ -241,4 +352,34 @@ func dial(addr string) *connection {
 	}
 
 	return client
+}
+
+func encodeGossip(g gossip) ([]byte, error) {
+	var (
+		body  []byte
+		err   error
+	)
+
+	if body, err = json.Marshal(g); err != nil {
+		return body, err
+	}
+
+	body = append(body, byte('\n'))
+	return body, nil
+}
+
+func getTransactionsInBlocks(tx *blockchain.Transaction) map[utils.Hash]*blockchain.Transaction {
+	var transactions = make(map[utils.Hash]*blockchain.Transaction)
+
+	for _, b := range blocks {
+		for _, tx := range b.Transactions {
+			for _, input := range tx.TXInput {
+				if bytes.Compare(input.TXid[:], tx.ID[:]) == 0 {
+					transactions[tx.ID] = tx
+				}
+			}
+		}
+	}
+
+	return transactions
 }

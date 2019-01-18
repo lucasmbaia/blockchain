@@ -1,7 +1,7 @@
 package cli
 
 import (
-	"encoding/hex"
+	//"encoding/hex"
 	"fmt"
 	"github.com/lucasmbaia/blockchain"
 )
@@ -10,15 +10,40 @@ const (
 	MULTIPLIER = 100000000
 )
 
-func newTransaction(private, from, to string, value float64) {
+func (c *CLI) newTransaction(private, from, to string, value float64) {
+	var infos = blockchain.Infos{
+		Private:  private,
+		From:	  from,
+		To:	  to,
+		Value:	  value,
+	}
+
 	var (
-		err    error
-		amount uint64
-		w      *blockchain.Wallet
-		valid  bool
-		bc     *blockchain.Blockchain
-		tx     *blockchain.Transaction
-		txs    []blockchain.Transaction
+		body []byte
+		err   error
+	)
+
+	if body, err = infos.Serialize(); err != nil {
+		panic(err)
+	}
+
+	if err = transmit(gossip{
+		Option:	"local_transaction",
+		Body:	body,
+	}); err != nil {
+		panic(fmt.Sprintf("Deu ruim: %s\n", err.Error()))
+	}
+}
+/*func (c *CLI) newTransaction(private, from, to string, value float64) {
+	var (
+		err	error
+		amount	uint64
+		w	*blockchain.Wallet
+		valid	bool
+		bc	*blockchain.Blockchain
+		tx	*blockchain.Transaction
+		txs	[]blockchain.Transaction
+		g	gossip
 	)
 
 	amount = uint64(value * MULTIPLIER)
@@ -47,11 +72,14 @@ func newTransaction(private, from, to string, value float64) {
 		panic(fmt.Sprintf("Error to sign transaction: %s", err.Error()))
 	}
 
+	g = gossip {
+		Option:	"transaction",
+		Body:	tx.Serialize(),
+	}
+
+	if err = transmit(g); err != nil {
+		panic(fmt.Sprintf("Error to transmit transaction: %s", err))
+	}
+
 	fmt.Printf("Transaction ID: %s\n", hex.EncodeToString(tx.ID[:]))
-
-	fmt.Println(blockchain.ValidTransaction(tx, bc))
-}
-
-func main() {
-	newTransaction("6704c183d5278523ad8a1eb88ba256ad1ea22222bda127fd5972f5acecdee835", "1CyssrDhEvZv2jXci6F5oueZwMXszm6kLs", "1G1yPBfSeLRY2sSzLGNbAUWRFBgSv58F4r", 0.01)
-}
+}*/

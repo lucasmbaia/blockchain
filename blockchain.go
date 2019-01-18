@@ -25,7 +25,35 @@ type Blockchain struct {
 	wa  []byte
 }
 
-func (bc *Blockchain) AddBlock(data []byte) {
+func (bc *Blockchain) AddBlock(block *Block) error {
+	var err error
+
+	if err = bc.db.Update(func(tx *bolt.Tx) error {
+		var bucket *bolt.Bucket = tx.Bucket([]byte(BLOCKS_BOCKET))
+
+		if err = bucket.Put(block.Hash[:], block.Serialize()); err != nil {
+			return err
+		}
+
+		if err = bucket.Put([]byte("l"), block.Hash[:]); err != nil {
+			return err
+		}
+
+		if err = bucket.Put([]byte("i"), []byte(fmt.Sprintf("%d", block.Index))); err != nil {
+			return err
+		}
+
+		bc.tip = block.Hash[:]
+
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (bc *Blockchain) NewBlock(data []byte) {
 	var (
 		hash	      utils.Hash
 		index	      int64
@@ -60,8 +88,62 @@ func (bc *Blockchain) AddBlock(data []byte) {
 	transactions = append(transactions, ctbx)
 
 	for _, tx := range UnprocessedTransactions {
-		if err = ValidTransaction(tx, bc); err == nil {
-			transactions = append(transactions, tx)
+		var txInputs = make(map[utils.Hash]*Transaction)
+
+		if txInputs, err = bc.GetTransactionsInTXInput(tx); err == nil {
+			if err = tx.ValidTransaction(txInputs); err == nil {
+				transactions = append(transactions, tx)
+			}
+		}
+	}
+	lastBlock.CheckProcessedTransactions(transactions)
+
+	var newBlock = NewBlock(operations, int32(index), []*Transaction{ctbx}, data, hash)
+	bc.AddBlock(newBlock)
+}
+
+/*func (bc *Blockchain) AddBlock(data []byte) {
+	var (
+		hash	      utils.Hash
+		index	      int64
+		err	      error
+		ctbx	      *Transaction
+		lastBlock     *Block
+		transactions  []*Transaction
+		operations    Operations
+	)
+
+	if err = bc.db.View(func(tx *bolt.Tx) error {
+		var bucket *bolt.Bucket = tx.Bucket([]byte(BLOCKS_BOCKET))
+		var h = bucket.Get([]byte("l"))
+		var i = bucket.Get([]byte("i"))
+
+		copy(hash[:], h)
+
+		if index, err = strconv.ParseInt(string(i), 10, 64); err != nil {
+			return err
+		}
+
+		var encode = bucket.Get(hash[:])
+		lastBlock = Deserialize(encode)
+
+		return nil
+	}); err != nil {
+		log.Fatalf("Error to add new block: %s\n", err)
+	}
+
+	index++
+	ctbx = NewCoinbase(bc.wa, "Coinbase Transaction", index)
+	transactions = append(transactions, ctbx)
+
+	for _, tx := range UnprocessedTransactions {
+		var txInputs = make(map[utils.Hash]*Transaction)
+
+		if txInputs, err = bc.GetTransactionsInTXInput(tx); err == nil {
+			if err = tx.ValidTransaction(txInputs); err == nil {
+				//if err = ValidTransaction(tx, bc); err == nil {
+				transactions = append(transactions, tx)
+			}
 		}
 	}
 	lastBlock.CheckProcessedTransactions(transactions)
@@ -93,6 +175,45 @@ func (bc *Blockchain) AddBlock(data []byte) {
 	for _, tx := range transactions {
 		RemoveUnprocessedTransactions(tx)
 	}
+}*/
+
+func (bc *Blockchain) ValidBlock(block *Block) bool {
+	var (
+		hash	utils.Hash
+		merkle	*MerkleRoot
+		err	error
+	)
+
+	hash = block.Header.BlockHash()
+	if bytes.Compare(hash[:], block.Hash[:]) != 0 {
+		return false
+	}
+
+	if HashToBig(&hash).Cmp(CalcDifficultEasy(int(block.Header.Bits))) > 0 {
+		return false
+	}
+
+	for _, tx := range block.Transactions {
+		if !tx.IsCoinbase() {
+			var txInputs = make(map[utils.Hash]*Transaction)
+
+			if txInputs, err = bc.GetTransactionsInTXInput(tx); err != nil {
+				return false
+			}
+
+			if err = tx.ValidTransaction(txInputs); err != nil {
+				//if err = ValidTransaction(tx, bc); err != nil {
+				return false
+			}
+		}
+	}
+
+	merkle = NewMerkleTree(block.Transactions)
+	if bytes.Compare(block.Header.MerkleRoot[:], merkle.MerkleNode.Hash[:]) != 0 {
+		return false
+	}
+
+	return true
 }
 
 func (bc *Blockchain) UnspentTransaction(pubHash string) ([]Transaction, error) {
@@ -115,7 +236,7 @@ func (bc *Blockchain) UnspentTransaction(pubHash string) ([]Transaction, error) 
 		for _, tx := range block.Transactions {
 			inputTX = append(inputTX, tx.TXInput...)
 			txID = hex.EncodeToString(tx.ID[:])
-		Outputs:
+			Outputs:
 			for idx, out := range tx.TXOutput {
 				if spentTX[txID] != nil {
 					for _, sout := range spentTX[txID] {
@@ -161,6 +282,29 @@ func (bc *Blockchain) UnspentTransaction(pubHash string) ([]Transaction, error) 
 	}
 
 	return unspentTX, nil
+}
+
+func (bc *Blockchain) GetTransactionsInTXInput(tx *Transaction) (map[utils.Hash]*Transaction, error) {
+	var (
+		transactions  = make(map[utils.Hash]*Transaction)
+		err	      error
+		exists	      bool
+		transaction   Transaction
+	)
+
+	for _, input := range tx.TXInput {
+		if exists, transaction, err = bc.FindTransaction(input.TXid); err != nil {
+			return transactions, err
+		}
+
+		if !exists {
+			return transactions, errors.New(fmt.Sprintf("Transacion %x not exists", input.TXid))
+		}
+
+		transactions[transaction.ID] = &transaction
+	}
+
+	return transactions, nil
 }
 
 func (bc *Blockchain) FindTransaction(id utils.Hash) (bool, Transaction, error) {

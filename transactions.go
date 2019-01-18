@@ -90,7 +90,7 @@ func DeserializeTransaction(t []byte) *Transaction {
 }
 
 func (tx *Transaction) IsCoinbase() bool {
-	return len(tx.TXInput) == 1 && len(tx.TXInput[0].TXid) == 0 && tx.TXInput[0].Vout == -1
+	return len(tx.TXInput) == 1 && tx.TXInput[0].Vout == -1
 }
 
 func (txOut *TXOutput) Lock(address []byte) {
@@ -316,13 +316,12 @@ func (tx *Transaction) SignTransaction(w *Wallet, txs []Transaction) error {
 	}
 }*/
 
-func ValidTransaction(tx *Transaction, bc *Blockchain) error {
+func (tx *Transaction) ValidTransaction(transactions map[utils.Hash]*Transaction) error {
 	var (
 		err         error
 		signature   string
 		pubkey      string
-		transaction Transaction
-		exists      bool
+		transaction *Transaction
 		decoded     []byte
 		hpk         []byte
 		hspk        string
@@ -336,16 +335,9 @@ func ValidTransaction(tx *Transaction, bc *Blockchain) error {
 	curve = elliptic.P256()
 
 	for _, input := range tx.TXInput {
+		transaction = transactions[input.TXid]
 		if signature, pubkey, err = parseScriptSig(input.ScriptSig.Hex); err != nil {
 			return err
-		}
-
-		if exists, transaction, err = bc.FindTransaction(input.TXid); err != nil {
-			return err
-		}
-
-		if !exists {
-			return errors.New("Transaction not exists")
 		}
 
 		hspk = strings.Replace(transaction.TXOutput[input.Vout].ScriptPubKey.Asm, "OP_DUP OP_HASH160 ", "", -1)
