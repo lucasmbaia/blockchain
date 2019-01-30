@@ -13,7 +13,7 @@ import (
 	"fmt"
 	"encoding/json"
 	"sync"
-	"time"
+	//"time"
 )
 
 const (
@@ -106,6 +106,15 @@ func StartNode(ctx context.Context, address []byte, nodes []string) {
 	go client.operations()
 	go client.getHistory()
 
+	/*ticker := time.NewTicker(2000 * time.Millisecond)
+	go func() {
+		for _ = range ticker.C {
+			client.operation.Done <- struct{}{}
+			index++
+			go client.mining(blocks[len(blocks) -1].Hash)
+		}
+	}()*/
+
 	<-ctx.Done()
 }
 
@@ -131,7 +140,7 @@ func (c *Client) getHistory() {
 			for {
 				select {
 				case h := <-history:
-					if index < h.Index {
+					if index <= h.Index {
 						index = h.Index
 						hash = h.Hash
 						master = h.Node
@@ -178,17 +187,8 @@ func (c *Client) getHistory() {
 		blocks = append(blocks, b[i])
 	}
 
+	index++
 	go c.mining(hash)
-
-	ticker := time.NewTicker(2 * time.Second)
-	go func() {
-		for _ = range ticker.C {
-			c.operation.Pause <- struct{}{}
-			c.operation.Done <- struct{}{}
-
-			go c.mining(hash)
-		}
-	}()
 }
 
 func (c *Client) operations() {
@@ -199,24 +199,29 @@ func (c *Client) operations() {
 	for {
 		select {
 		case block := <-c.block:
-			if len(c.connection) > 0 {
-				var body []byte
-				var g = gossip{
-					Option:	"block",
-					Body:	block.Serialize(),
+			if validBlock(block) {
+				if len(c.connection) > 0 {
+					var body []byte
+					var g = gossip{
+						Option:	"block",
+						Body:	block.Serialize(),
+					}
+
+					if body, err = json.Marshal(g); err == nil {
+						body = append(body, byte('\n'))
+						for _, conn := range c.connection{
+							conn.conn.Write(body)
+						}
+					} else {
+						log.Printf("Error to serializer: %s\n", err.Error())
+					}
 				}
 
-				if body, err = json.Marshal(g); err == nil {
-					body = append(body, byte('\n'))
-					for _, conn := range c.connection{
-						conn.conn.Write(body)
-					}
-				} else {
-					log.Printf("Error to serializer: %s\n", err.Error())
-				}
+				fmt.Printf("Minerado block index: %d\n", block.Index)
+				blocks = append(blocks, block)
+				index++
 			}
 
-			fmt.Printf("%x\n", block.Hash)
 			go c.mining(block.Hash)
 		case transaction := <-c.transaction:
 			if len(c.connection) > 0 {
@@ -238,12 +243,12 @@ func (c *Client) operations() {
 }
 
 func (c *Client) mining(hash utils.Hash) {
-	fmt.Println("MINERANDO")
 	var (
 		transactions	[]*blockchain.Transaction
 		ctbx		*blockchain.Transaction
 		block		*blockchain.Block
 		operations	blockchain.Operations
+		valid		bool
 	)
 
 	operations = blockchain.Operations{
@@ -272,12 +277,23 @@ func (c *Client) mining(hash utils.Hash) {
 	for _, tx := range blockchain.UnprocessedTransactions {
 		if err := tx.ValidTransaction(getTransactionsInBlocks(tx)); err == nil {
 			transactions = append(transactions, tx)
+		} else {
+			blockchain.RemoveUnprocessedTransactions(tx)
 		}
 	}
 	blocks[len(blocks) - 1].CheckProcessedTransactions(transactions)
 
-	block = blockchain.NewBlock(operations, index, transactions, []byte(""), hash)
-	c.block <- block
+	fmt.Printf("Mining New Block index %d\n", index)
+	block, valid = blockchain.NewBlock(operations, index, transactions, []byte(""), hash)
+
+	if valid {
+		c.block <- block
+	}
+
+	for _, tx := range transactions {
+		blockchain.RemoveUnprocessedTransactions(tx)
+	}
+
 	return
 }
 
@@ -312,13 +328,26 @@ func (c *Client) handleConnection() {
 
 			switch gossip.Option {
 			case "block":
-				fmt.Println("BLOCK PORRA")
 				c.operation.Pause <- struct{}{}
 
 				var block = blockchain.Deserialize(gossip.Body)
 
-				c.operation.Done <- struct{}{}
-				go c.mining(block.Hash)
+				if validBlock(block) {
+					fmt.Printf("Block %d is valid!\n", block.Index)
+					c.operation.Done <- struct{}{}
+					blocks = append(blocks, block)
+					index++
+					go c.mining(block.Hash)
+				} else {
+					fmt.Printf("Block %d is invalid!\n", block.Index)
+
+					if index >= block.Index {
+						c.operation.Resume <- struct{}{}
+					} else {
+						index = block.Index + 1
+						go c.mining(block.Hash)
+					}
+				}
 			case "sizeof_chain":
 				var h History
 
@@ -338,6 +367,8 @@ func (c *Client) handleConnection() {
 				}
 			case "transaction":
 				fmt.Println("TRANSACTION")
+				var transaction = blockchain.DeserializeTransaction(gossip.Body)
+				blockchain.AppendUnprocessedTransactions(transaction)
 			default:
 				log.Printf("Invalid Option")
 			}
@@ -377,6 +408,43 @@ func encodeGossip(g gossip) ([]byte, error) {
 
 	body = append(body, byte('\n'))
 	return body, nil
+}
+
+func validBlock(block *blockchain.Block) bool {
+	var (
+		hash	utils.Hash
+		merkle	*blockchain.MerkleRoot
+		err	error
+	)
+
+	if block.Index <= blocks[len(blocks) -1].Index || block.Index - blocks[len(blocks) -1].Index != 1 {
+		return false
+	}
+
+	hash = block.Header.BlockHash()
+	if bytes.Compare(hash[:], block.Hash[:]) != 0 {
+		return false
+	}
+
+	if blockchain.HashToBig(&hash).Cmp(blockchain.CalcDifficultEasy(int(block.Header.Bits))) > 0 {
+		return false
+	}
+
+	for _, tx := range block.Transactions {
+		if !tx.IsCoinbase() {
+			if err = tx.ValidTransaction(getTransactionsInBlocks(tx)); err != nil {
+				return false
+			}
+		}
+	}
+
+	merkle = blockchain.NewMerkleTree(block.Transactions)
+	if bytes.Compare(block.Header.MerkleRoot[:], merkle.MerkleNode.Hash[:]) != 0 {
+		return false
+	}
+
+	return true
+
 }
 
 func getTransactionsInBlocks(tx *blockchain.Transaction) map[utils.Hash]*blockchain.Transaction {

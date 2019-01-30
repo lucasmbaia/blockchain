@@ -91,7 +91,7 @@ func Test_Cpu_Control_Miner(t *testing.T) {
 	}
 
 	go func() {
-		CpuMinerControl(operations, &bh)
+		CpuMinerControl(operations, &bh, 0)
 		done <- struct{}{}
 	}()
 

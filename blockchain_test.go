@@ -11,7 +11,8 @@ func Test_NewBlockchain_Add_Block(t *testing.T) {
 	bc := NewBlockchain([]byte("1CyssrDhEvZv2jXci6F5oueZwMXszm6kLs"))
 
 	for {
-		bc.AddBlock(bc.NewBlock(Operations{}, []byte("Send 1 BTC to Lucas")))
+		block, _ := bc.NewBlock(Operations{}, []byte("Send 1 BTC to Lucas"))
+		bc.AddBlock(block)
 	}
 	//bc.AddBlock([]byte("Send 2 more BTC to Lucas"))
 }
@@ -39,6 +40,7 @@ func Test_Iterator_PrintBlochckain(t *testing.T) {
 		count++
 	}
 
+	fmt.Println(indexBlock)
 	fmt.Println(count)
 }
 

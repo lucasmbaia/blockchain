@@ -40,6 +40,7 @@ type operation struct {
 	done	chan struct{}
 	resume	chan struct{}
 	pause	chan struct{}
+	mining	chan struct{}
 }
 
 type connection struct {
@@ -132,7 +133,6 @@ func (s *server) operations() {
 	for {
 		select {
 		case block := <-s.block:
-			fmt.Println("PORRAAA")
 			if err = s.replyToNodes(gossip{
 				Option: "block",
 				Body:	block.Serialize(),
@@ -140,17 +140,18 @@ func (s *server) operations() {
 				log.Printf("Error to reply transaction to nodes: %s\n", err)
 			}
 
+			fmt.Printf("Minerado block index: %d\n", block.Index)
 			go s.mining()
 		}
 	}
 }
 
 func (s *server) mining() {
-	fmt.Println("MINING")
 	var (
-		block *Block
+		block		*Block
 		operations      Operations
-		//err		error
+		err		error
+		valid		bool
 	)
 
 	operations = Operations{
@@ -173,13 +174,15 @@ func (s *server) mining() {
 		}
 	}()
 
-	block = s.bc.NewBlock(operations, []byte(""))
-	s.block <- block
-	/*if err = s.bc.AddBlock(block); err == nil {
-		s.block <- block
-	} else {
-		log.Printf("Error to add block: %s\n", err)
-	}*/
+	block, valid = s.bc.NewBlock(operations, []byte(""))
+
+	if valid {
+		if err = s.bc.AddBlock(block); err == nil {
+			s.block <- block
+		} else {
+			log.Printf("Error to add block: %s\n", err)
+		}
+	}
 }
 
 func (s *server) handleConnection(c *connection, bc *Blockchain) {
@@ -246,20 +249,40 @@ func (s *server) handleConnection(c *connection, bc *Blockchain) {
 			var infos *Infos
 
 			if infos, err = DeserializeInfos(g.Body); err != nil {
-				sendReply(c, gossip{Option: "local_transaction", Error: err})
+				sendReply(c, gossip{Option: "transaction", Error: err})
 				break
 			}
 
 			if err = s.validTransaction(infos, bc); err != nil {
-				sendReply(c, gossip{Option: "local_transaction", Error: err})
+				sendReply(c, gossip{Option: "transaction", Error: err})
 				break
 			}
 
-			sendReply(c, gossip{Option: "local_transaction"})
+			sendReply(c, gossip{Option: "transaction"})
 			s.replyToNodes(g, fmt.Sprintf("%s:%d", c.conn.RemoteAddr().(*net.TCPAddr).IP.String(), c.conn.RemoteAddr().(*net.TCPAddr).Port))
 		case "block":
 			fmt.Println("BLOCK")
-			//s.replyToNodes(g, "")
+			s.operation.pause <- struct{}{}
+			var block = Deserialize(g.Body)
+
+			if bc.ValidBlock(block) {
+				fmt.Printf("Block %d is valid!\n", block.Index)
+				s.operation.done <- struct{}{}
+				if err = bc.AddBlock(block); err != nil {
+					fmt.Printf("DEU MERDA AO ADICIONAR BLOCK: %s\n", err.Error())
+				}
+
+				go s.mining()
+			} else {
+				fmt.Printf("Block %d is invalid!\n", block.Index)
+				if indexBlock >= block.Index {
+					s.operation.resume <- struct{}{}
+				} else {
+					go s.mining()
+				}
+			}
+
+			s.replyToNodes(g, fmt.Sprintf("%s:%d", c.conn.RemoteAddr().(*net.TCPAddr).IP.String(), c.conn.RemoteAddr().(*net.TCPAddr).Port))
 		}
 	}
 }
@@ -358,6 +381,7 @@ func StartFullNode(ctx context.Context, address []byte, nodes []string) {
 			done:	make(chan struct{}),
 			resume: make(chan struct{}),
 			pause:	make(chan struct{}),
+			mining:	make(chan struct{}),
 		},
 	}
 
@@ -383,7 +407,8 @@ func StartFullNode(ctx context.Context, address []byte, nodes []string) {
 	}()
 
 	go s.operations()
-	//go s.mining()
+	go s.mining()
+
 	<-ctx.Done()
 }
 

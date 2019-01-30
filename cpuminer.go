@@ -41,7 +41,7 @@ func CpuMiner(bh *BlockHeader) (bool, utils.Hash) {
 	return false, hash
 }
 
-func CpuMinerControl(o Operations, bh *BlockHeader) (bool, utils.Hash) {
+func CpuMinerControl(o Operations, bh *BlockHeader, index int32) (bool, utils.Hash) {
 	var (
 		difficult *big.Int
 		hash	  utils.Hash
@@ -58,13 +58,13 @@ func CpuMinerControl(o Operations, bh *BlockHeader) (bool, utils.Hash) {
 			log.Println("PAUSE")
 			select {
 			case <-o.Done:
-				log.Println("DONE")
+				log.Println("DONE FDP")
 				return false, hash
 			case <-o.Resume:
 				log.Println("RESUME")
 			}
 		case <-o.Done:
-			log.Println("DONE")
+			log.Println("DONE DE MERDA")
 			return false, hash
 		default:
 			if i >= MAX_NONCE {
@@ -75,7 +75,7 @@ func CpuMinerControl(o Operations, bh *BlockHeader) (bool, utils.Hash) {
 			hash = bh.BlockHash()
 
 			if HashToBig(&hash).Cmp(difficult) <= 0 {
-				log.Printf("#################### Block Mined With HashRate %vHS ####################", float64(i) / time.Since(start).Seconds())
+				log.Printf("#################### Block Mined index %d With HashRate %vHS ####################", index, float64(i) / time.Since(start).Seconds())
 				return true, hash
 			}
 			i++

@@ -19,6 +19,8 @@ const (
 	MINING_RATE   = 10000
 )
 
+var indexBlock int32
+
 type Blockchain struct {
 	tip []byte
 	db  *bolt.DB
@@ -53,7 +55,7 @@ func (bc *Blockchain) AddBlock(block *Block) error {
 	return nil
 }
 
-func (bc *Blockchain) NewBlock(operations Operations, data []byte) *Block {
+func (bc *Blockchain) NewBlock(operations Operations, data []byte) (*Block, bool) {
 	var (
 		hash	      utils.Hash
 		index	      int64
@@ -77,12 +79,14 @@ func (bc *Blockchain) NewBlock(operations Operations, data []byte) *Block {
 		var encode = bucket.Get(hash[:])
 		lastBlock = Deserialize(encode)
 
+		fmt.Printf("CARALHO DO ULTIMO INDEX: %d\n", index)
 		return nil
 	}); err != nil {
 		log.Fatalf("Error to add new block: %s\n", err)
 	}
 
 	index++
+	indexBlock++
 	ctbx = NewCoinbase(bc.wa, "Coinbase Transaction", index)
 	transactions = append(transactions, ctbx)
 
@@ -92,11 +96,18 @@ func (bc *Blockchain) NewBlock(operations Operations, data []byte) *Block {
 		if txInputs, err = bc.GetTransactionsInTXInput(tx); err == nil {
 			if err = tx.ValidTransaction(txInputs); err == nil {
 				transactions = append(transactions, tx)
+			} else {
+				RemoveUnprocessedTransactions(tx)
 			}
 		}
 	}
 	lastBlock.CheckProcessedTransactions(transactions)
 
+	for _, tx := range transactions {
+		RemoveUnprocessedTransactions(tx)
+	}
+
+	fmt.Printf("Mining New Block index: %d\n", index)
 	return NewBlock(operations, int32(index), []*Transaction{ctbx}, data, hash)
 }
 
@@ -177,10 +188,20 @@ func (bc *Blockchain) NewBlock(operations Operations, data []byte) *Block {
 
 func (bc *Blockchain) ValidBlock(block *Block) bool {
 	var (
-		hash	utils.Hash
-		merkle	*MerkleRoot
-		err	error
+		hash	  utils.Hash
+		merkle	  *MerkleRoot
+		err	  error
+		bci	  = bc.Iterator()
+		lastBlock *Block
 	)
+
+	if lastBlock, err = bci.Next(); err != nil {
+		return false
+	}
+
+	if block.Index <= lastBlock.Index || block.Index - lastBlock.Index != 1 {
+		return false
+	}
 
 	hash = block.Header.BlockHash()
 	if bytes.Compare(hash[:], block.Hash[:]) != 0 {
@@ -484,7 +505,8 @@ func NewBlockchain(wa []byte) *Blockchain {
 
 		if bucket == nil {
 			var ctbx = NewCoinbase(wa, "Coinbase Transaction", 0)
-			var genesis = NewGenesisBlock(ctbx)
+			var genesis *Block
+			genesis, _ = NewGenesisBlock(ctbx)
 
 			if bucket, err = tx.CreateBucket([]byte(BLOCKS_BOCKET)); err != nil {
 				return err
@@ -505,6 +527,14 @@ func NewBlockchain(wa []byte) *Blockchain {
 			tip = genesis.Hash[:]
 		} else {
 			tip = bucket.Get([]byte("l"))
+			var i = bucket.Get([]byte("i"))
+			var index int64
+
+			if index, err = strconv.ParseInt(string(i), 10, 32); err != nil {
+				return err
+			}
+
+			indexBlock = int32(index)
 		}
 
 		return nil
