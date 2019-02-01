@@ -28,7 +28,8 @@ var (
 type server struct {
 	sync.RWMutex
 
-	operation   *operation
+	operation   map[int32]*operation
+	//operation   *operation
 	connections map[string]*connection
 	wcAddress   []byte
 	bc	    *Blockchain
@@ -60,6 +61,11 @@ type Infos struct {
 	From	string
 	To	string
 	Value	float64
+}
+
+type Response struct {
+	Valid bool
+	Hash  utils.Hash
 }
 
 func (i *Infos) Serialize() ([]byte, error) {
@@ -154,6 +160,16 @@ func (s *server) mining() {
 		valid		bool
 	)
 
+	indexBlock++
+
+	s.Lock()
+	s.operation[indexBlock] = &operation{
+		done:	make(chan struct{}),
+		resume: make(chan struct{}),
+		pause:	make(chan struct{}),
+	}
+	s.Unlock()
+
 	operations = Operations{
 		Done:	make(chan struct{}),
 		Resume: make(chan struct{}),
@@ -163,12 +179,12 @@ func (s *server) mining() {
 	go func() {
 		for {
 			select {
-			case <-s.operation.done:
+			case <-s.operation[indexBlock].done:
 				operations.Done <- struct{}{}
 				return
-			case <-s.operation.resume:
+			case <-s.operation[indexBlock].resume:
 				operations.Resume <- struct{}{}
-			case <-s.operation.pause:
+			case <-s.operation[indexBlock].pause:
 				operations.Pause <- struct{}{}
 			}
 		}
@@ -179,6 +195,10 @@ func (s *server) mining() {
 	if valid {
 		if err = s.bc.AddBlock(block); err == nil {
 			s.block <- block
+
+			if _, ok := s.operation[indexBlock]; ok {
+				delete(s.operation, indexBlock)
+			}
 		} else {
 			log.Printf("Error to add block: %s\n", err)
 		}
@@ -262,22 +282,32 @@ func (s *server) handleConnection(c *connection, bc *Blockchain) {
 			s.replyToNodes(g, fmt.Sprintf("%s:%d", c.conn.RemoteAddr().(*net.TCPAddr).IP.String(), c.conn.RemoteAddr().(*net.TCPAddr).Port))
 		case "block":
 			fmt.Println("BLOCK")
-			s.operation.pause <- struct{}{}
 			var block = Deserialize(g.Body)
+			s.operation[block.Index].pause <- struct{}{}
 
 			if bc.ValidBlock(block) {
 				fmt.Printf("Block %d is valid!\n", block.Index)
-				s.operation.done <- struct{}{}
+				s.operation[block.Index].done <- struct{}{}
 				if err = bc.AddBlock(block); err != nil {
 					fmt.Printf("DEU MERDA AO ADICIONAR BLOCK: %s\n", err.Error())
 				}
 
+				body, _ := json.Marshal(Response{Valid: true, Hash: block.Hash})
+				encoded, _ := encodeGossip(gossip{Option: "valid_block", Body: body})
+				c.conn.Write(encoded)
+
+				if _, ok := s.operation[block.Index]; ok {
+					delete(s.operation, block.Index)
+				}
 				go s.mining()
 			} else {
 				fmt.Printf("Block %d is invalid!\n", block.Index)
+				s.operation[block.Index].resume <- struct{}{}
 				if indexBlock >= block.Index {
-					s.operation.resume <- struct{}{}
+					s.operation[block.Index].resume <- struct{}{}
+					fmt.Printf("Voltando a minerar block: %d\n", indexBlock)
 				} else {
+					s.operation[block.Index].done <- struct{}{}
 					go s.mining()
 				}
 			}
@@ -377,12 +407,13 @@ func StartFullNode(ctx context.Context, address []byte, nodes []string) {
 		wcAddress:    address,
 		connections:  make(map[string]*connection),
 		block:	      make(chan *Block, 1),
-		operation:    &operation{
+		operation:    make(map[int32]*operation),
+		/*operation:    &operation{
 			done:	make(chan struct{}),
 			resume: make(chan struct{}),
 			pause:	make(chan struct{}),
 			mining:	make(chan struct{}),
-		},
+		},*/
 	}
 
 	go func() {

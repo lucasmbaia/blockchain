@@ -22,10 +22,11 @@ const (
 
 var (
 	mutex	      = &sync.RWMutex{}
-	index	      int32
+	//index	      int32
 	history	      = make(chan History)
 	blockHistory  = make(chan *blockchain.Block)
 	blocks	      []*blockchain.Block
+	response      = make(map[utils.Hash]chan Response)
 )
 
 type gossip struct {
@@ -52,6 +53,11 @@ type History struct {
 	Index int32
 	Hash  utils.Hash
 	Node  string
+}
+
+type Response struct {
+	Valid bool
+	Hash  utils.Hash
 }
 
 type connection struct {
@@ -126,8 +132,9 @@ func (c *Client) getHistory() {
 		body	  []byte
 		err	  error
 		nodes	  = make(map[string]net.Conn)
-		master  string
+		master	  string
 		b	  []*blockchain.Block
+		index	  int32
 	)
 
 	if body, err = encodeGossip(gossip{Option: "sizeof_chain"}); err != nil {
@@ -187,8 +194,8 @@ func (c *Client) getHistory() {
 		blocks = append(blocks, b[i])
 	}
 
-	index++
-	go c.mining(hash)
+	//index++
+	go c.mining()
 }
 
 func (c *Client) operations() {
@@ -201,28 +208,55 @@ func (c *Client) operations() {
 		case block := <-c.block:
 			if validBlock(block) {
 				if len(c.connection) > 0 {
-					var body []byte
-					var g = gossip{
+					var (
+						resp	= make(chan Response, len(c.connection))
+						body	[]byte
+						g	gossip
+						wg	sync.WaitGroup
+						include	= true
+					)
+
+					g = gossip{
 						Option:	"block",
 						Body:	block.Serialize(),
 					}
 
+					mutex.Lock()
+					response[block.Hash] = resp
+					mutex.Unlock()
+
 					if body, err = json.Marshal(g); err == nil {
+						wg.Add(len(c.connection))
+						go func() {
+							for {
+								select {
+								case r := <-resp:
+									if !r.Valid {
+										include = false
+									}
+
+									wg.Done()
+								}
+							}
+						}()
+
 						body = append(body, byte('\n'))
 						for _, conn := range c.connection{
 							conn.conn.Write(body)
 						}
+						wg.Wait()
 					} else {
 						log.Printf("Error to serializer: %s\n", err.Error())
 					}
-				}
 
-				fmt.Printf("Minerado block index: %d\n", block.Index)
-				blocks = append(blocks, block)
-				index++
+					if include {
+						fmt.Printf("Minerado block index: %d\n", block.Index)
+						blocks = append(blocks, block)
+					}
+				}
 			}
 
-			go c.mining(block.Hash)
+			go c.mining()
 		case transaction := <-c.transaction:
 			if len(c.connection) > 0 {
 				var body []byte
@@ -242,13 +276,14 @@ func (c *Client) operations() {
 	}
 }
 
-func (c *Client) mining(hash utils.Hash) {
+func (c *Client) mining() {
 	var (
 		transactions	[]*blockchain.Transaction
 		ctbx		*blockchain.Transaction
 		block		*blockchain.Block
 		operations	blockchain.Operations
 		valid		bool
+		index		int32
 	)
 
 	operations = blockchain.Operations{
@@ -271,6 +306,7 @@ func (c *Client) mining(hash utils.Hash) {
 		}
 	}()
 
+	index = blocks[len(blocks) -1].Index + 1
 	ctbx = blockchain.NewCoinbase(c.address, "Coinbase Transaction", int64(index))
 	transactions = append(transactions, ctbx)
 
@@ -284,7 +320,7 @@ func (c *Client) mining(hash utils.Hash) {
 	blocks[len(blocks) - 1].CheckProcessedTransactions(transactions)
 
 	fmt.Printf("Mining New Block index %d\n", index)
-	block, valid = blockchain.NewBlock(operations, index, transactions, []byte(""), hash)
+	block, valid = blockchain.NewBlock(operations, index, transactions, []byte(""), blocks[len(blocks) -1].Hash)
 
 	if valid {
 		c.block <- block
@@ -329,24 +365,43 @@ func (c *Client) handleConnection() {
 			switch gossip.Option {
 			case "block":
 				c.operation.Pause <- struct{}{}
-
 				var block = blockchain.Deserialize(gossip.Body)
 
 				if validBlock(block) {
 					fmt.Printf("Block %d is valid!\n", block.Index)
 					c.operation.Done <- struct{}{}
 					blocks = append(blocks, block)
-					index++
-					go c.mining(block.Hash)
+					go c.mining()
 				} else {
 					fmt.Printf("Block %d is invalid!\n", block.Index)
 
-					if index >= block.Index {
+					if blocks[len(blocks) - 1].Index == block.Index {
+						c.operation.Resume <- struct{}{}
+						fmt.Printf("Voltando a minerar block: %d\n", blocks[len(blocks) -1].Index)
+					} else {
+						fmt.Printf("Pegando history novamente")
+						c.operation.Done <- struct{}{}
+						blocks = []*blockchain.Block{}
+						go c.getHistory()
+					}
+					//c.operation.Resume <- struct{}{}
+					//fmt.Printf("Voltando a minerar block: %d\n", blocks[len(blocks) -1].Index)
+
+					/*if index >= block.Index {
 						c.operation.Resume <- struct{}{}
 					} else {
+						c.operations.Done <- struct{}{}
 						index = block.Index + 1
 						go c.mining(block.Hash)
-					}
+					}*/
+				}
+			case "valid_block":
+				var resp Response
+
+				if err = json.Unmarshal(gossip.Body, &resp); err == nil {
+					response[resp.Hash] <- resp
+				} else {
+					log.Printf("Error to deserialize response: %s\n", err.Error())
 				}
 			case "sizeof_chain":
 				var h History

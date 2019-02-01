@@ -86,7 +86,7 @@ func (bc *Blockchain) NewBlock(operations Operations, data []byte) (*Block, bool
 	}
 
 	index++
-	indexBlock++
+	//indexBlock++
 	ctbx = NewCoinbase(bc.wa, "Coinbase Transaction", index)
 	transactions = append(transactions, ctbx)
 
