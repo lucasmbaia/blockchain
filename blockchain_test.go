@@ -28,8 +28,6 @@ func Test_Iterator_PrintBlochckain(t *testing.T) {
 
 		fmt.Printf("Block Index: %d, Block Hash: %x, Block Data: %s, Block Prev. Hash: %x, Block Bits: %d, Block Create: %s, Block Nonce: %d\n", block.Index, block.Hash, block.Data, block.Header.PrevBlock[:], block.Header.Bits, block.Header.Timestamp, block.Header.Nonce)
 
-		fmt.Println(bc.ValidBlock(block))
-
 		for _, transactions := range block.Transactions {
 			fmt.Printf("Transaction ID: %x\n", transactions.ID)
 		}

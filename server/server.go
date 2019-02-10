@@ -22,7 +22,6 @@ const (
 
 var (
 	mutex	      = &sync.RWMutex{}
-	//index	      int32
 	history	      = make(chan History)
 	blockHistory  = make(chan *blockchain.Block)
 	blocks	      []*blockchain.Block
@@ -35,7 +34,10 @@ type gossip struct {
 }
 
 type Client struct {
-	operation   *Operation
+	sync.RWMutex
+
+	operation   map[int32]*Operation
+	//operation   *Operation
 	connection  []*connection
 	address	    []byte
 
@@ -93,11 +95,12 @@ func StartNode(ctx context.Context, address []byte, nodes []string) {
 		address:      address,
 		block:	      make(chan *blockchain.Block, 1),
 		transaction:  make(chan *blockchain.Transaction, 1),
-		operation:    &Operation{
+		operation:    make(map[int32]*Operation),
+		/*operation:    &Operation{
 			Done:   make(chan struct{}),
 			Resume: make(chan struct{}),
 			Pause:  make(chan struct{}),
-		},
+		},*/
 	}
 
 	go client.listen()
@@ -194,7 +197,6 @@ func (c *Client) getHistory() {
 		blocks = append(blocks, b[i])
 	}
 
-	//index++
 	go c.mining()
 }
 
@@ -286,6 +288,23 @@ func (c *Client) mining() {
 		index		int32
 	)
 
+	index = blocks[len(blocks) -1].Index + 1
+
+	c.Lock()
+	c.operation[index] = &Operation{
+		Done:   make(chan struct{}),
+		Resume: make(chan struct{}),
+		Pause:  make(chan struct{}),
+	}
+	c.Unlock()
+	defer func() {
+		c.Lock()
+		if _, ok := c.operation[index]; ok {
+			delete(c.operation, index)
+		}
+		c.Unlock()
+	}()
+
 	operations = blockchain.Operations{
 		Done:	make(chan struct{}),
 		Resume:	make(chan struct{}),
@@ -295,18 +314,17 @@ func (c *Client) mining() {
 	go func() {
 		for {
 			select {
-			case <-c.operation.Done:
+			case <-c.operation[index].Done:
 				operations.Done <- struct{}{}
 				return
-			case <-c.operation.Resume:
+			case <-c.operation[index].Resume:
 				operations.Resume <- struct{}{}
-			case <-c.operation.Pause:
+			case <-c.operation[index].Pause:
 				operations.Pause <- struct{}{}
 			}
 		}
 	}()
 
-	index = blocks[len(blocks) -1].Index + 1
 	ctbx = blockchain.NewCoinbase(c.address, "Coinbase Transaction", int64(index))
 	transactions = append(transactions, ctbx)
 
@@ -364,23 +382,23 @@ func (c *Client) handleConnection() {
 
 			switch gossip.Option {
 			case "block":
-				c.operation.Pause <- struct{}{}
 				var block = blockchain.Deserialize(gossip.Body)
+				c.operation[block.Index].Pause <- struct{}{}
 
 				if validBlock(block) {
 					fmt.Printf("Block %d is valid!\n", block.Index)
-					c.operation.Done <- struct{}{}
+					c.operation[block.Index].Done <- struct{}{}
 					blocks = append(blocks, block)
 					go c.mining()
 				} else {
 					fmt.Printf("Block %d is invalid!\n", block.Index)
 
 					if blocks[len(blocks) - 1].Index == block.Index {
-						c.operation.Resume <- struct{}{}
+						c.operation[block.Index].Resume <- struct{}{}
 						fmt.Printf("Voltando a minerar block: %d\n", blocks[len(blocks) -1].Index)
 					} else {
 						fmt.Printf("Pegando history novamente")
-						c.operation.Done <- struct{}{}
+						c.operation[block.Index].Done <- struct{}{}
 						blocks = []*blockchain.Block{}
 						go c.getHistory()
 					}
